@@ -20,8 +20,8 @@ class WatchPartyContent {
         this.createWatchPartyUI();
         this.setupMessageListener();
         
-        // 初期化時はストレージからの自動接続は行わない
-        // ポップアップからの明示的な指示でのみ接続
+        // 保存されたルーム情報があれば復元（自動接続は行わない）
+        await this.restoreRoomState();
     }
     
     
@@ -113,35 +113,6 @@ class WatchPartyContent {
                         isHost: this.isHost
                     });
                     break;
-                    
-                case 'sendComment':
-                    if (this.socket && this.socket.connected) {
-                        this.socket.emit('comment', { message: request.message });
-                        sendResponse({ success: true });
-                    } else {
-                        sendResponse({ success: false, error: 'Not connected' });
-                    }
-                    break;
-                    
-                case 'connect':
-                    this.currentRoom = request.roomId;
-                    this.currentUser = request.userId;
-                    this.username = request.username;
-                    this.connectToRoom(request.token);
-                    sendResponse({ success: true });
-                    break;
-                    
-                case 'disconnect':
-                    if (this.socket) {
-                        this.socket.disconnect();
-                    }
-                    this.currentRoom = null;
-                    this.currentUser = null;
-                    this.username = null;
-                    this.isHost = false;
-                    this.updateStatus('切断');
-                    sendResponse({ success: true });
-                    break;
             }
             return true; // 非同期レスポンスを有効化
         });
@@ -157,14 +128,20 @@ class WatchPartyContent {
             this.socket.disconnect();
         }
         
-        this.socket = io('http://localhost:3000', {
-            auth: { token }
+        const serverUrl = window.location.href.includes('localhost') ? 
+            'http://localhost:3000' : 
+            'https://lightbells-watch-party.an.r.appspot.com';
+        
+        this.socket = io(serverUrl, {
+            auth: { token },
+            transports: ['polling']
         });
         
         this.socket.on('connect', () => {
             this.log('🔗 Connected to room:', this.currentRoom);
             this.log('👤 User ID:', this.currentUser);
             this.updateStatus('接続中');
+            this.showRoomInfo();
         });
         
         this.socket.on('disconnect', () => {
@@ -177,6 +154,7 @@ class WatchPartyContent {
             this.isHost = data.isHost;
             this.log('👑 Host status updated:', this.isHost ? 'HOST' : 'MEMBER');
             this.updateStatus(this.isHost ? 'ホスト' : 'メンバー');
+            this.updateMembers(data.members);
             
             // ポップアップに部屋の状態を送信
             chrome.runtime.sendMessage({
@@ -420,23 +398,382 @@ class WatchPartyContent {
     }
     
     createWatchPartyUI() {
-        const ui = document.createElement('div');
-        ui.id = 'watch-party-ui';
-        ui.innerHTML = `
-            <div class="watch-party-status">
-                <span id="wp-status">未接続</span>
-                <span id="wp-room">${this.currentRoom || ''}</span>
+        // フローティングボタン
+        const floatingButton = document.createElement('div');
+        floatingButton.id = 'wp-floating-button';
+        floatingButton.innerHTML = `
+            <div class="wp-button-content">
+                <div class="wp-icon">🎬</div>
+                <div class="wp-status-text">
+                    <span id="wp-status">未接続</span>
+                    <span id="wp-room">${this.currentRoom || ''}</span>
+                </div>
             </div>
         `;
         
-        document.body.appendChild(ui);
+        // ルーム管理ポップアップ
+        const roomPopup = document.createElement('div');
+        roomPopup.id = 'wp-room-popup';
+        roomPopup.className = 'wp-popup hidden';
+        roomPopup.innerHTML = `
+            <div class="wp-popup-content">
+                <div class="wp-popup-header">
+                    <h3>Watch Party</h3>
+                    <button class="wp-close-btn" id="wp-close-popup">×</button>
+                </div>
+                <div class="wp-popup-body">
+                    <div id="wp-room-setup" class="wp-section">
+                        <div class="wp-input-group">
+                            <label>ルームID</label>
+                            <input type="text" id="wp-room-id" placeholder="ルームIDを入力">
+                        </div>
+                        <div class="wp-button-group">
+                            <button id="wp-join-room" class="wp-btn wp-btn-primary">参加</button>
+                            <button id="wp-create-room" class="wp-btn wp-btn-secondary">新規作成</button>
+                        </div>
+                    </div>
+                    <div id="wp-room-info" class="wp-section hidden">
+                        <div class="wp-connection-status">
+                            <div id="wp-connection-indicator" class="wp-indicator disconnected"></div>
+                            <span id="wp-connection-text">接続していません</span>
+                        </div>
+                        <div class="wp-members">
+                            <h4>参加者</h4>
+                            <div id="wp-members-list"></div>
+                        </div>
+                        <button id="wp-leave-room" class="wp-btn wp-btn-danger">退出</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // コメント入力エリア
+        const commentInput = document.createElement('div');
+        commentInput.id = 'wp-comment-input';
+        commentInput.innerHTML = `
+            <div class="wp-comment-toggle">
+                <button id="wp-toggle-comment" class="wp-toggle-btn">
+                    <span class="wp-toggle-icon">‹</span>
+                </button>
+            </div>
+            <div class="wp-comment-panel hidden" id="wp-comment-panel">
+                <div class="wp-comment-form">
+                    <input type="text" id="wp-comment-text" placeholder="コメントを入力...">
+                    <button id="wp-send-comment" class="wp-btn wp-btn-primary">送信</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(floatingButton);
+        document.body.appendChild(roomPopup);
+        document.body.appendChild(commentInput);
+        
+        this.bindUIEvents();
+    }
+    
+    bindUIEvents() {
+        // フローティングボタンクリック
+        const floatingButton = document.getElementById('wp-floating-button');
+        if (floatingButton) {
+            floatingButton.addEventListener('click', () => this.toggleRoomPopup());
+        }
+        
+        // ポップアップ閉じるボタン
+        const closeBtn = document.getElementById('wp-close-popup');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.hideRoomPopup());
+        }
+        
+        // ルーム参加・作成ボタン
+        const joinBtn = document.getElementById('wp-join-room');
+        const createBtn = document.getElementById('wp-create-room');
+        const leaveBtn = document.getElementById('wp-leave-room');
+        
+        if (joinBtn) joinBtn.addEventListener('click', () => this.joinRoom());
+        if (createBtn) createBtn.addEventListener('click', () => this.createRoom());
+        if (leaveBtn) leaveBtn.addEventListener('click', () => this.leaveRoom());
+        
+        // コメントトグルボタン
+        const toggleCommentBtn = document.getElementById('wp-toggle-comment');
+        if (toggleCommentBtn) {
+            toggleCommentBtn.addEventListener('click', () => this.toggleCommentPanel());
+        }
+        
+        // コメント送信
+        const sendCommentBtn = document.getElementById('wp-send-comment');
+        const commentInput = document.getElementById('wp-comment-text');
+        
+        if (sendCommentBtn) sendCommentBtn.addEventListener('click', () => this.sendComment());
+        if (commentInput) {
+            commentInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    this.sendComment();
+                }
+            });
+        }
+        
+        // ポップアップ外クリックで閉じる
+        document.addEventListener('click', (e) => {
+            const popup = document.getElementById('wp-room-popup');
+            const floatingBtn = document.getElementById('wp-floating-button');
+            
+            if (popup && !popup.classList.contains('hidden') && 
+                !popup.contains(e.target) && !floatingBtn.contains(e.target)) {
+                this.hideRoomPopup();
+            }
+        });
+    }
+    
+    toggleRoomPopup() {
+        const popup = document.getElementById('wp-room-popup');
+        if (popup) {
+            popup.classList.toggle('hidden');
+        }
+    }
+    
+    hideRoomPopup() {
+        const popup = document.getElementById('wp-room-popup');
+        if (popup) {
+            popup.classList.add('hidden');
+        }
+    }
+    
+    toggleCommentPanel() {
+        const panel = document.getElementById('wp-comment-panel');
+        const toggleBtn = document.getElementById('wp-toggle-comment');
+        
+        if (panel && toggleBtn) {
+            panel.classList.toggle('hidden');
+            const isOpen = !panel.classList.contains('hidden');
+            
+            // ボタンの見た目を更新
+            if (isOpen) {
+                toggleBtn.classList.add('open');
+                toggleBtn.querySelector('.wp-toggle-icon').textContent = '›';
+                document.getElementById('wp-comment-text').focus();
+            } else {
+                toggleBtn.classList.remove('open');
+                toggleBtn.querySelector('.wp-toggle-icon').textContent = '‹';
+            }
+        }
+    }
+    
+    async joinRoom() {
+        const roomIdInput = document.getElementById('wp-room-id');
+        const roomId = roomIdInput.value.trim();
+        
+        if (!roomId) {
+            alert('ルームIDを入力してください');
+            return;
+        }
+        
+        // ユーザーネームを取得
+        const username = await this.getStoredUsername();
+        if (!username) {
+            alert('ユーザーネームを設定してください。拡張機能のポップアップから設定できます。');
+            return;
+        }
+        
+        try {
+            const serverUrl = window.location.href.includes('localhost') ? 
+                'http://localhost:3000' : 
+                'https://lightbells-watch-party.an.r.appspot.com';
+            
+            const response = await fetch(`${serverUrl}/api/join-room`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ roomId, username })
+            });
+            
+            if (!response.ok) {
+                throw new Error('ルームへの参加に失敗しました');
+            }
+            
+            const data = await response.json();
+            
+            // ストレージに保存
+            await this.saveRoomData(data.roomId, data.token, data.userId, username);
+            
+            this.currentRoom = data.roomId;
+            this.currentUser = data.userId;
+            this.username = username;
+            this.isHost = data.isHost;
+            
+            this.connectToRoom(data.token);
+            this.showRoomInfo();
+            
+        } catch (error) {
+            console.error('Join room error:', error);
+            alert('ルームへの参加に失敗しました: ' + error.message);
+        }
+    }
+    
+    async createRoom() {
+        const roomId = this.generateRoomId();
+        document.getElementById('wp-room-id').value = roomId;
+        await this.joinRoom();
+    }
+    
+    async leaveRoom() {
+        if (this.socket) {
+            this.socket.disconnect();
+        }
+        
+        // ストレージから削除
+        await this.removeRoomData();
+        
+        this.currentRoom = null;
+        this.currentUser = null;
+        this.username = null;
+        this.isHost = false;
+        
+        this.updateStatus('切断');
+        this.showRoomSetup();
+    }
+    
+    sendComment() {
+        const commentInput = document.getElementById('wp-comment-text');
+        const message = commentInput.value.trim();
+        
+        if (!message) return;
+        
+        if (this.socket && this.socket.connected) {
+            this.socket.emit('comment', { message });
+            commentInput.value = '';
+        } else {
+            alert('ルームに接続していません');
+        }
+    }
+    
+    showRoomInfo() {
+        const setupSection = document.getElementById('wp-room-setup');
+        const infoSection = document.getElementById('wp-room-info');
+        
+        if (setupSection && infoSection) {
+            setupSection.classList.add('hidden');
+            infoSection.classList.remove('hidden');
+        }
+    }
+    
+    showRoomSetup() {
+        const setupSection = document.getElementById('wp-room-setup');
+        const infoSection = document.getElementById('wp-room-info');
+        
+        if (setupSection && infoSection) {
+            setupSection.classList.remove('hidden');
+            infoSection.classList.add('hidden');
+        }
+        
+        // 入力をクリア
+        const roomIdInput = document.getElementById('wp-room-id');
+        if (roomIdInput) roomIdInput.value = '';
+    }
+    
+    async getStoredUsername() {
+        try {
+            const result = await chrome.storage.local.get(['globalUsername']);
+            return result.globalUsername;
+        } catch (error) {
+            return null;
+        }
+    }
+    
+    async saveRoomData(roomId, token, userId, username) {
+        const tabId = this.tabId || Date.now();
+        const storageKey = `tab_${tabId}`;
+        
+        await chrome.storage.local.set({
+            [`${storageKey}_roomId`]: roomId,
+            [`${storageKey}_token`]: token,
+            [`${storageKey}_userId`]: userId,
+            [`${storageKey}_username`]: username
+        });
+    }
+    
+    async removeRoomData() {
+        const tabId = this.tabId || Date.now();
+        const storageKey = `tab_${tabId}`;
+        
+        await chrome.storage.local.remove([
+            `${storageKey}_roomId`,
+            `${storageKey}_token`,
+            `${storageKey}_userId`,
+            `${storageKey}_username`
+        ]);
+    }
+    
+    generateRoomId() {
+        return Math.random().toString(36).substring(2, 8).toUpperCase();
+    }
+    
+    async restoreRoomState() {
+        const token = await this.loadStoredData();
+        if (token && this.currentRoom && this.currentUser) {
+            // 情報は復元するが自動接続はしない
+            this.updateStatus('未接続');
+            this.showRoomSetup();
+            
+            // ルームIDを入力欄に設定
+            const roomIdInput = document.getElementById('wp-room-id');
+            if (roomIdInput) {
+                roomIdInput.value = this.currentRoom;
+            }
+        }
     }
     
     updateStatus(status) {
         const statusElement = document.getElementById('wp-status');
+        const roomElement = document.getElementById('wp-room');
+        
         if (statusElement) {
             statusElement.textContent = status;
         }
+        
+        if (roomElement) {
+            roomElement.textContent = this.currentRoom || '';
+        }
+        
+        // 接続状態インジケーターの更新
+        const indicator = document.getElementById('wp-connection-indicator');
+        const connectionText = document.getElementById('wp-connection-text');
+        
+        if (indicator && connectionText) {
+            if (status === '切断' || status === '未接続') {
+                indicator.className = 'wp-indicator disconnected';
+                connectionText.textContent = '接続していません';
+            } else {
+                indicator.className = 'wp-indicator connected';
+                connectionText.textContent = `ルーム ${this.currentRoom} に接続中 (${status})`;
+            }
+        }
+    }
+    
+    updateMembers(members) {
+        const membersList = document.getElementById('wp-members-list');
+        if (!membersList) return;
+        
+        membersList.innerHTML = '';
+        members.forEach(member => {
+            const memberElement = document.createElement('div');
+            memberElement.className = 'wp-member';
+            
+            const displayName = member.username || `ユーザー${member.id.substring(0, 8)}`;
+            
+            if (member.id === this.currentUser) {
+                memberElement.classList.add('wp-member-self');
+                memberElement.textContent = `${displayName} (あなた)`;
+            } else {
+                memberElement.textContent = displayName;
+            }
+            
+            if (member.id === this.currentRoom?.host) {
+                memberElement.classList.add('wp-member-host');
+            }
+            
+            membersList.appendChild(memberElement);
+        });
     }
 }
 

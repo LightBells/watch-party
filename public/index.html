@@ -147,7 +147,11 @@
         const serverStatus = document.getElementById('server-status');
         
         // サーバー接続状態を確認
-        fetch('http://localhost:3000/api/health')
+        const serverUrl = window.location.hostname === 'localhost' ? 
+            'http://localhost:3000' : 
+            'https://lightbells-watch-party.an.r.appspot.com';
+        
+        fetch(`${serverUrl}/api/health`)
             .then(response => response.json())
             .then(data => {
                 serverStatus.textContent = 'サーバーに接続されています';

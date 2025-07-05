@@ -22,7 +22,9 @@ const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ["polling"],
+  allowEIO3: true
 });
 
 app.use(cors());

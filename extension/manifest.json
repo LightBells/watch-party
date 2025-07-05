@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://www.amazon.co.jp/*",
     "https://animestore.docomo.ne.jp/*",
-    "http://localhost:3000/*"
+    "http://localhost:3000/*",
+    "https://lightbells-watch-party.an.r.appspot.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -21,7 +22,8 @@
       "matches": [
         "https://www.amazon.co.jp/gp/video/*",
         "https://animestore.docomo.ne.jp/*",
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "https://lightbells-watch-party.an.r.appspot.com/*"
       ],
       "js": ["socket.io.js", "content.js"],
       "css": ["content.css"]

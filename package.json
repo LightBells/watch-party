@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
-    "build": "webpack --mode production",
+    "build": "echo 'No build needed'",
     "lint": "eslint . --ext .js,.ts",
     "test": "jest"
   },

@@ -4,12 +4,12 @@
     <meta charset="utf-8">
     <style>
         body {
-            width: 300px;
-            min-height: 400px;
-            padding: 16px;
+            width: 280px;
+            padding: 20px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 14px;
-            background: #f5f5f5;
+            background: #f8f9fa;
+            margin: 0;
         }
         
         .header {
@@ -18,207 +18,138 @@
         }
         
         .header h1 {
-            margin: 0;
+            margin: 0 0 8px 0;
             color: #333;
-            font-size: 18px;
+            font-size: 20px;
+            font-weight: 600;
         }
         
-        .room-section {
+        .header p {
+            margin: 0;
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .username-section {
             background: white;
-            padding: 16px;
-            border-radius: 8px;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             margin-bottom: 16px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
         .input-group {
-            margin-bottom: 12px;
+            margin-bottom: 16px;
         }
         
         .input-group label {
             display: block;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
             font-weight: 500;
-            color: #555;
+            color: #333;
+            font-size: 13px;
         }
         
         .input-group input {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
             font-size: 14px;
             box-sizing: border-box;
+            transition: border-color 0.2s ease;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        
+        .char-count {
+            text-align: right;
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
         }
         
         .btn {
             width: 100%;
-            padding: 10px;
+            padding: 12px;
             background: #007bff;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
-            margin-bottom: 8px;
+            font-weight: 500;
+            transition: background-color 0.2s ease;
         }
         
         .btn:hover {
             background: #0056b3;
         }
         
-        .btn-secondary {
+        .btn:disabled {
             background: #6c757d;
-        }
-        
-        .btn-secondary:hover {
-            background: #545b62;
+            cursor: not-allowed;
         }
         
         .status {
             padding: 12px;
-            border-radius: 4px;
-            margin-bottom: 12px;
-            font-size: 13px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 12px;
+            text-align: center;
         }
         
-        .status.connected {
+        .status.success {
             background: #d4edda;
             color: #155724;
             border: 1px solid #c3e6cb;
         }
         
-        .status.disconnected {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .members {
-            margin-top: 12px;
-        }
-        
-        .members h3 {
-            margin: 0 0 8px 0;
-            font-size: 14px;
-            color: #333;
-        }
-        
-        .member {
-            padding: 4px 8px;
-            background: #e9ecef;
-            border-radius: 4px;
-            margin-bottom: 4px;
-            font-size: 12px;
-        }
-        
-        .member.host {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .chat-section {
-            background: white;
+        .info-section {
+            background: #e3f2fd;
             padding: 16px;
             border-radius: 8px;
-            margin-bottom: 16px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .chat-messages {
-            height: 120px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 8px;
-            margin-bottom: 8px;
-            background: #fafafa;
-        }
-        
-        .message {
-            margin-bottom: 8px;
             font-size: 12px;
+            color: #1565c0;
+            line-height: 1.4;
         }
         
-        .message .user {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .message .time {
-            color: #666;
-            font-size: 10px;
-        }
-        
-        .chat-input {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .chat-input input {
-            flex: 1;
-            padding: 6px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-        
-        .chat-input button {
-            padding: 6px 12px;
-            background: #28a745;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        
-        .hidden {
-            display: none;
+        .info-section strong {
+            display: block;
+            margin-bottom: 4px;
         }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>Watch Party</h1>
+        <p>ユーザーネーム設定</p>
     </div>
     
-    <div id="room-setup" class="room-section">
+    <div id="username-status" class="status success" style="display: none;">
+        ユーザーネームが保存されました
+    </div>
+    
+    <div class="username-section">
         <div class="input-group">
             <label for="username">ユーザーネーム</label>
             <input type="text" id="username" placeholder="ユーザーネームを入力" maxlength="20">
+            <div class="char-count">
+                <span id="char-count">0</span>/20
+            </div>
         </div>
-        <div class="input-group">
-            <label for="room-id">ルームID</label>
-            <input type="text" id="room-id" placeholder="ルームIDを入力">
-        </div>
-        <button id="join-room" class="btn">ルームに参加</button>
-        <button id="create-room" class="btn btn-secondary">新しいルームを作成</button>
+        <button id="save-username" class="btn" disabled>保存</button>
     </div>
     
-    <div id="room-info" class="room-section hidden">
-        <div id="connection-status" class="status disconnected">
-            接続していません
-        </div>
-        
-        <div class="members">
-            <h3>参加者</h3>
-            <div id="members-list"></div>
-        </div>
-        
-        <button id="leave-room" class="btn btn-secondary">ルームを退出</button>
+    <div class="info-section">
+        <strong>使い方:</strong>
+        ルームの参加・作成は動画ページの右上のボタンから行えます。
+        コメントは画面下部の入力欄から送信できます。
     </div>
     
-    <div id="chat-section" class="chat-section hidden">
-        <h3>チャット</h3>
-        <div id="chat-messages" class="chat-messages"></div>
-        <div class="chat-input">
-            <input type="text" id="chat-input" placeholder="メッセージを入力">
-            <button id="send-message">送信</button>
-        </div>
-    </div>
-    
-    <script src="socket.io.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>
