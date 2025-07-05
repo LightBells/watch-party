@@ -1,0 +1,19 @@
+runtime: nodejs20
+
+env_variables:
+  JWT_SECRET: your-jwt-secret-key
+  FIRESTORE_PROJECT_ID: your-project-id
+
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  target_cpu_utilization: 0.6
+
+handlers:
+- url: /socket.io/.*
+  script: auto
+  secure: always
+  
+- url: /.*
+  script: auto
+  secure: always

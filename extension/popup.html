@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            width: 300px;
+            min-height: 400px;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            color: #333;
+            font-size: 18px;
+        }
+        
+        .room-section {
+            background: white;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .input-group {
+            margin-bottom: 12px;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #555;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .btn:hover {
+            background: #0056b3;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        
+        .status {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .members {
+            margin-top: 12px;
+        }
+        
+        .members h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .member {
+            padding: 4px 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        
+        .member.host {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .chat-section {
+            background: white;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .chat-messages {
+            height: 120px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #fafafa;
+        }
+        
+        .message {
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        
+        .message .user {
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .message .time {
+            color: #666;
+            font-size: 10px;
+        }
+        
+        .chat-input {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .chat-input input {
+            flex: 1;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        .chat-input button {
+            padding: 6px 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Watch Party</h1>
+    </div>
+    
+    <div id="room-setup" class="room-section">
+        <div class="input-group">
+            <label for="room-id">ルームID</label>
+            <input type="text" id="room-id" placeholder="ルームIDを入力">
+        </div>
+        <button id="join-room" class="btn">ルームに参加</button>
+        <button id="create-room" class="btn btn-secondary">新しいルームを作成</button>
+    </div>
+    
+    <div id="room-info" class="room-section hidden">
+        <div id="connection-status" class="status disconnected">
+            接続していません
+        </div>
+        
+        <div class="members">
+            <h3>参加者</h3>
+            <div id="members-list"></div>
+        </div>
+        
+        <button id="leave-room" class="btn btn-secondary">ルームを退出</button>
+    </div>
+    
+    <div id="chat-section" class="chat-section hidden">
+        <h3>チャット</h3>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input">
+            <input type="text" id="chat-input" placeholder="メッセージを入力">
+            <button id="send-message">送信</button>
+        </div>
+    </div>
+    
+    <script src="socket.io.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>

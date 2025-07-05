@@ -1,0 +1,88 @@
+#watch-party-ui {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+.watch-party-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#wp-status {
+    font-weight: bold;
+    color: #28a745;
+}
+
+#wp-room {
+    color: #6c757d;
+    font-size: 10px;
+}
+
+.watch-party-comment {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10001;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    animation: commentFadeIn 0.3s ease-out, commentFadeOut 0.3s ease-out 4.7s forwards;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.watch-party-comment .user {
+    color: #007bff;
+    font-weight: bold;
+}
+
+@keyframes commentFadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+@keyframes commentFadeOut {
+    from {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.8);
+    }
+}
+
+/* Prime Video specific styles */
+.dv-player-fullscreen #watch-party-ui {
+    top: 80px;
+    right: 20px;
+}
+
+/* dアニメストア specific styles */
+.fullscreen #watch-party-ui {
+    top: 80px;
+    right: 20px;
+}
