@@ -6,6 +6,14 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
+const DEBUG_MODE = process.env.DEBUG_MODE === 'true';
+
+const debugLog = (...args) => {
+  if (DEBUG_MODE) {
+    console.log(...args);
+  }
+};
+
 const USE_FIRESTORE = process.env.NODE_ENV === 'production';
 
 const app = express();
@@ -124,7 +132,7 @@ io.on('connection', (socket) => {
   
   socket.on('play', (data) => {
     const room = rooms.get(roomId);
-    if (room && room.host === userId) {
+    if (room && room.members.has(userId)) {
       room.videoState = {
         isPlaying: true,
         currentTime: data.currentTime,
@@ -133,6 +141,7 @@ io.on('connection', (socket) => {
       
       socket.to(roomId).emit('play', {
         currentTime: data.currentTime,
+        userId: userId,
         timestamp: Date.now()
       });
     }
@@ -140,7 +149,7 @@ io.on('connection', (socket) => {
   
   socket.on('pause', (data) => {
     const room = rooms.get(roomId);
-    if (room && room.host === userId) {
+    if (room && room.members.has(userId)) {
       room.videoState = {
         isPlaying: false,
         currentTime: data.currentTime,
@@ -149,6 +158,7 @@ io.on('connection', (socket) => {
       
       socket.to(roomId).emit('pause', {
         currentTime: data.currentTime,
+        userId: userId,
         timestamp: Date.now()
       });
     }
@@ -156,7 +166,7 @@ io.on('connection', (socket) => {
   
   socket.on('sync', (data) => {
     const room = rooms.get(roomId);
-    if (room && room.host === userId) {
+    if (room && room.members.has(userId)) {
       room.videoState = {
         isPlaying: data.isPlaying,
         currentTime: data.currentTime,
@@ -166,6 +176,7 @@ io.on('connection', (socket) => {
       socket.to(roomId).emit('sync', {
         isPlaying: data.isPlaying,
         currentTime: data.currentTime,
+        userId: userId,
         timestamp: Date.now()
       });
     }
@@ -216,5 +227,5 @@ app.get('/api/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  debugLog(`Server running on port ${PORT}`);
 });
