@@ -1,26 +1,47 @@
-#watch-party-ui {
+/* =================================
+   フローティングボタン
+   ================================= */
+#wp-floating-button {
     position: fixed;
     top: 20px;
     right: 20px;
     z-index: 10000;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.6);
     color: white;
-    padding: 10px 15px;
-    border-radius: 8px;
+    padding: 12px 16px;
+    border-radius: 12px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     backdrop-filter: blur(10px);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
 }
 
-.watch-party-status {
+#wp-floating-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 25px rgba(0, 0, 0, 0.4);
+}
+
+.wp-button-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wp-icon {
+    font-size: 16px;
+}
+
+.wp-status-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 #wp-status {
-    font-weight: bold;
+    font-weight: 600;
     color: #28a745;
 }
 
@@ -29,6 +50,373 @@
     font-size: 10px;
 }
 
+/* =================================
+   ルーム管理ポップアップ
+   ================================= */
+.wp-popup {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 10001;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden;
+    width: 320px;
+    animation: popupSlideIn 0.2s ease-out;
+}
+
+.wp-popup.hidden {
+    display: none;
+}
+
+@keyframes popupSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.wp-popup-header {
+    background: rgba(248, 249, 250, 0.6);
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(233, 236, 239, 0.6);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.wp-popup-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+.wp-close-btn {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.wp-close-btn:hover {
+    background: #e9ecef;
+}
+
+.wp-popup-body {
+    padding: 20px;
+}
+
+.wp-section {
+    display: block;
+}
+
+.wp-section.hidden {
+    display: none;
+}
+
+.wp-input-group {
+    margin-bottom: 16px;
+}
+
+.wp-input-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    color: #333;
+    font-size: 13px;
+}
+
+.wp-input-group input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid rgba(233, 236, 239, 0.6);
+    border-radius: 8px;
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(5px);
+}
+
+.wp-input-group input:focus {
+    outline: none;
+    border-color: rgba(0, 123, 255, 0.6);
+    background: rgba(255, 255, 255, 0.8);
+}
+
+.wp-button-group {
+    display: flex;
+    gap: 8px;
+}
+
+.wp-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    flex: 1;
+}
+
+.wp-btn-primary {
+    background: rgba(0, 123, 255, 0.6);
+    color: white;
+    backdrop-filter: blur(5px);
+}
+
+.wp-btn-primary:hover {
+    background: rgba(0, 86, 179, 0.8);
+}
+
+.wp-btn-secondary {
+    background: rgba(108, 117, 125, 0.6);
+    color: white;
+    backdrop-filter: blur(5px);
+}
+
+.wp-btn-secondary:hover {
+    background: rgba(84, 91, 98, 0.8);
+}
+
+.wp-btn-danger {
+    background: rgba(220, 53, 69, 0.6);
+    color: white;
+    width: 100%;
+    backdrop-filter: blur(5px);
+}
+
+.wp-btn-danger:hover {
+    background: rgba(200, 35, 51, 0.8);
+}
+
+/* 接続状態 */
+.wp-connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(248, 249, 250, 0.6);
+    border-radius: 8px;
+    backdrop-filter: blur(5px);
+}
+
+.wp-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.wp-indicator.connected {
+    background: #28a745;
+}
+
+.wp-indicator.disconnected {
+    background: #dc3545;
+}
+
+#wp-connection-text {
+    font-size: 12px;
+    color: #333;
+}
+
+/* メンバーリスト */
+.wp-members h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #333;
+    font-weight: 600;
+}
+
+.wp-member {
+    padding: 6px 10px;
+    background: rgba(248, 249, 250, 0.6);
+    border-radius: 6px;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #333;
+    backdrop-filter: blur(5px);
+}
+
+.wp-member-self {
+    background: rgba(227, 242, 253, 0.6);
+    color: #1565c0;
+    font-weight: 500;
+    backdrop-filter: blur(5px);
+}
+
+.wp-member-host {
+    border-left: 3px solid #ffc107;
+}
+
+/* =================================
+   コメント入力エリア
+   ================================= */
+#wp-comment-input {
+    position: fixed;
+    bottom: 20px;
+    right: 0;
+    z-index: 10000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.wp-comment-toggle {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0;
+}
+
+.wp-toggle-btn {
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    padding: 0;
+    border-radius: 20px 0 0 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transform: translateX(0);
+    width: 50px;
+    height: 50px;
+    position: relative;
+    border-right: 3px solid transparent;
+    box-sizing: border-box;
+}
+
+.wp-toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.8);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    border-right: 3px solid #007bff;
+}
+
+.wp-toggle-btn.open {
+    border-radius: 20px 0 0 20px;
+    transform: translateX(-270px);
+    background: rgba(0, 123, 255, 0.6);
+}
+
+.wp-toggle-btn.open:hover {
+    background: rgba(0, 123, 255, 0.8);
+}
+
+.wp-toggle-icon {
+    font-size: 24px;
+    line-height: 1;
+    font-family: monospace;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.wp-comment-panel {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(233, 236, 239, 0.6);
+    border-radius: 0;
+    padding: 0;
+    animation: panelSlideLeft 0.3s ease-out;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    width: 270px;
+    position: absolute;
+    right: 0px;
+    top: 0;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+}
+
+.wp-comment-panel.hidden {
+    display: none;
+}
+
+@keyframes panelSlideLeft {
+    from {
+        opacity: 0;
+        transform: translateX(20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+.wp-comment-form {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    padding: 0 16px;
+    align-items: center;
+}
+
+#wp-comment-text {
+    flex: 1;
+    padding: 0 12px;
+    border: 2px solid rgba(233, 236, 239, 0.6);
+    border-radius: 20px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(5px);
+    height: 38px;
+    box-sizing: border-box;
+}
+
+#wp-comment-text:focus {
+    border-color: rgba(0, 123, 255, 0.6);
+    background: rgba(255, 255, 255, 0.8);
+}
+
+#wp-send-comment {
+    padding: 0 20px;
+    background: rgba(0, 123, 255, 0.6);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    white-space: nowrap;
+    backdrop-filter: blur(5px);
+    height: 34px;
+}
+
+#wp-send-comment:hover {
+    background: rgba(0, 86, 179, 0.8);
+}
+
+/* =================================
+   コメント表示（既存）
+   ================================= */
 .watch-party-comment {
     position: fixed;
     top: 50%;
@@ -75,14 +463,73 @@
     }
 }
 
-/* Prime Video specific styles */
-.dv-player-fullscreen #watch-party-ui {
+/* =================================
+   レスポンシブ対応
+   ================================= */
+@media (max-width: 768px) {
+    .wp-popup {
+        width: calc(100vw - 40px);
+        right: 20px;
+    }
+    
+    #wp-floating-button {
+        top: 10px;
+        right: 10px;
+    }
+    
+    #wp-comment-input {
+        bottom: 10px;
+        right: 0;
+    }
+    
+    .wp-comment-panel {
+        min-width: 280px;
+        max-width: calc(100vw - 60px);
+    }
+    
+    .wp-toggle-btn {
+        width: 45px;
+        height: 45px;
+        padding: 12px 15px;
+    }
+    
+    .wp-toggle-icon {
+        font-size: 20px;
+    }
+}
+
+/* =================================
+   動画プレイヤー特有のスタイル
+   ================================= */
+/* Prime Video フルスクリーン */
+.dv-player-fullscreen #wp-floating-button {
     top: 80px;
     right: 20px;
 }
 
-/* dアニメストア specific styles */
-.fullscreen #watch-party-ui {
+.dv-player-fullscreen .wp-popup {
+    top: 130px;
+}
+
+/* dアニメストア フルスクリーン */
+.fullscreen #wp-floating-button {
     top: 80px;
     right: 20px;
+}
+
+.fullscreen .wp-popup {
+    top: 130px;
+}
+
+/* フルスクリーン時のコメント入力調整 */
+.dv-player-fullscreen #wp-comment-input,
+.fullscreen #wp-comment-input {
+    bottom: 80px; /* コントロールと重複しないように調整 */
+    right: 0;
+}
+
+/* フルスクリーン時のコメントパネル調整 */
+.dv-player-fullscreen .wp-comment-panel,
+.fullscreen .wp-comment-panel {
+    max-width: 350px;
 }
