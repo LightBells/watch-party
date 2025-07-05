@@ -5,6 +5,7 @@ class WatchPartyContent {
         this.isHost = false;
         this.currentRoom = null;
         this.currentUser = null;
+        this.username = null;
         this.syncInProgress = false;
         this.lastSyncTime = 0;
         this.debugMode = false; // デバッグモード設定
@@ -88,12 +89,14 @@ class WatchPartyContent {
         const result = await chrome.storage.local.get([
             `${storageKey}_roomId`,
             `${storageKey}_token`,
-            `${storageKey}_userId`
+            `${storageKey}_userId`,
+            `${storageKey}_username`
         ]);
         
         if (result[`${storageKey}_roomId`] && result[`${storageKey}_token`] && result[`${storageKey}_userId`]) {
             this.currentRoom = result[`${storageKey}_roomId`];
             this.currentUser = result[`${storageKey}_userId`];
+            this.username = result[`${storageKey}_username`];
             return result[`${storageKey}_token`];
         }
         return null;
@@ -123,6 +126,7 @@ class WatchPartyContent {
                 case 'connect':
                     this.currentRoom = request.roomId;
                     this.currentUser = request.userId;
+                    this.username = request.username;
                     this.connectToRoom(request.token);
                     sendResponse({ success: true });
                     break;
@@ -133,6 +137,7 @@ class WatchPartyContent {
                     }
                     this.currentRoom = null;
                     this.currentUser = null;
+                    this.username = null;
                     this.isHost = false;
                     this.updateStatus('切断');
                     sendResponse({ success: true });
@@ -212,13 +217,14 @@ class WatchPartyContent {
         
         this.socket.on('comment', (data) => {
             this.log('Received comment:', data);
-            this.showComment(data.message, data.userId);
+            this.showComment(data.message, data.username || data.userId);
             
             // ポップアップにチャットメッセージを送信
             chrome.runtime.sendMessage({
                 action: 'chatMessage',
                 data: {
                     userId: data.userId,
+                    username: data.username,
                     message: data.message,
                     timestamp: data.timestamp
                 }
@@ -399,11 +405,11 @@ class WatchPartyContent {
         this.log('✅ Video sync completed:', { isPlaying, currentTime });
     }
     
-    showComment(message, userId) {
+    showComment(message, displayName) {
         const commentElement = document.createElement('div');
         commentElement.className = 'watch-party-comment';
         commentElement.innerHTML = `
-            <span class="user">ユーザー${userId.substring(0, 8)}</span>: ${message}
+            <span class="user">${displayName}</span>: ${message}
         `;
         
         document.body.appendChild(commentElement);

@@ -49,7 +49,7 @@ const verifyToken = (token) => {
 };
 
 app.post('/api/join-room', (req, res) => {
-  const { roomId } = req.body;
+  const { roomId, username } = req.body;
   const userId = uuidv4();
   
   if (!rooms.has(roomId)) {
@@ -68,6 +68,7 @@ app.post('/api/join-room', (req, res) => {
   const room = rooms.get(roomId);
   room.members.set(userId, {
     id: userId,
+    username: username,
     joinedAt: Date.now()
   });
   
@@ -77,6 +78,7 @@ app.post('/api/join-room', (req, res) => {
     token,
     userId,
     roomId,
+    username,
     isHost: room.host === userId
   });
 });
@@ -122,8 +124,10 @@ io.on('connection', (socket) => {
   socket.on('comment', (data) => {
     const room = rooms.get(roomId);
     if (room && room.members.has(userId)) {
+      const member = room.members.get(userId);
       socket.to(roomId).emit('comment', {
         userId,
+        username: member.username,
         message: data.message,
         timestamp: Date.now()
       });
