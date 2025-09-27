@@ -21,12 +21,17 @@
     {
       "matches": [
         "https://www.amazon.co.jp/gp/video/*",
-        "https://animestore.docomo.ne.jp/*",
+        "https://www.amazon.co.jp/-/*/gp/video/*",
+        "https://animestore.docomo.ne.jp/animestore/sc_d_pc*",
         "http://localhost:3000/*",
         "https://lightbells-watch-party.an.r.appspot.com/*"
       ],
-      "js": ["content.js"],
-      "css": ["content.css"]
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ]
     }
   ],
   "action": {

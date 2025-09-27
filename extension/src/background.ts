@@ -5,15 +5,15 @@ type RoomData = {
 };
 
 type BackgroundRequest =
-  | { action: 'getRoomData' }
-  | { action: 'setRoomData'; data: RoomData }
-  | { action: 'clearRoomData' }
-  | { action: 'notifyContentScript'; data: RoomData }
-  | { action: 'getTabId' };
+  | {action: 'getRoomData'}
+  | {action: 'setRoomData'; data: RoomData}
+  | {action: 'clearRoomData'}
+  | {action: 'notifyContentScript'; data: RoomData}
+  | {action: 'getTabId'};
 
 type BackgroundResponse =
-  | { success: true; data?: RoomData; tabId?: number | null }
-  | { success: false; error: string };
+  | {success: true; data?: RoomData; tabId?: number | null}
+  | {success: false; error: string};
 
 class WatchPartyBackground {
   private readonly isDevelopment = !('update_url' in chrome.runtime.getManifest());
@@ -55,9 +55,14 @@ class WatchPartyBackground {
   private isSupportedSite(url?: string | null): boolean {
     if (!url) return false;
 
-    const supportedSites = ['amazon.co.jp/gp/video', 'animestore.docomo.ne.jp', 'localhost:3000'];
+    const supportedPatterns = [
+      /https?:\/\/www\.amazon\.co\.jp\/gp\/video\//,
+      /https?:\/\/www\.amazon\.co\.jp\/\-\/[^/]+\/gp\/video\//,
+      /animestore\.docomo\.ne\.jp\/animestore\/sc_d_pc/,
+      /localhost:3000/,
+    ];
 
-    return supportedSites.some((site) => url.includes(site));
+    return supportedPatterns.some((pattern) => pattern.test(url));
   }
 
   private handleMessage(request: BackgroundRequest, sender: chrome.runtime.MessageSender, sendResponse: (response: BackgroundResponse) => void): void {
@@ -76,48 +81,48 @@ class WatchPartyBackground {
 
       case 'notifyContentScript':
         this.notifyContentScript(request.data);
-        sendResponse({ success: true });
+        sendResponse({success: true});
         break;
 
       case 'getTabId':
-        sendResponse({ success: true, tabId: sender.tab?.id ?? null });
+        sendResponse({success: true, tabId: sender.tab?.id ?? null});
         break;
 
       default:
-        sendResponse({ success: false, error: 'Unknown action' });
+        sendResponse({success: false, error: 'Unknown action'});
     }
   }
 
   private async getRoomData(sendResponse: (response: BackgroundResponse) => void): Promise<void> {
     try {
       const result = await chrome.storage.local.get(['roomId', 'token', 'userId']);
-      sendResponse({ success: true, data: result as RoomData });
+      sendResponse({success: true, data: result as RoomData});
     } catch (error) {
-      sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+      sendResponse({success: false, error: error instanceof Error ? error.message : String(error)});
     }
   }
 
   private async setRoomData(data: RoomData, sendResponse: (response: BackgroundResponse) => void): Promise<void> {
     try {
       await chrome.storage.local.set(data);
-      sendResponse({ success: true });
+      sendResponse({success: true});
     } catch (error) {
-      sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+      sendResponse({success: false, error: error instanceof Error ? error.message : String(error)});
     }
   }
 
   private async clearRoomData(sendResponse: (response: BackgroundResponse) => void): Promise<void> {
     try {
       await chrome.storage.local.remove(['roomId', 'token', 'userId']);
-      sendResponse({ success: true });
+      sendResponse({success: true});
     } catch (error) {
-      sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+      sendResponse({success: false, error: error instanceof Error ? error.message : String(error)});
     }
   }
 
   private async notifyContentScript(data: RoomData): Promise<void> {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabs = await chrome.tabs.query({active: true, currentWindow: true});
 
       await Promise.all(
         tabs.map(async (tab) => {

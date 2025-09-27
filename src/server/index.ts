@@ -88,8 +88,8 @@ interface ServerToClientEvents {
     message: string;
     timestamp: number;
   }) => void;
-  'user-joined': (data: { userId: string; timestamp: number }) => void;
-  'user-left': (data: { userId: string; timestamp: number }) => void;
+  'user-joined': (data: { userId: string; members: RoomMember[]; timestamp: number }) => void;
+  'user-left': (data: { userId: string; members: RoomMember[]; timestamp: number }) => void;
   'host-changed': (data: { newHost: string; timestamp: number }) => void;
   navigate: (data: { url: string; userId: string; timestamp: number }) => void;
 }
@@ -248,6 +248,7 @@ io.on('connection', (socket) => {
 
     socket.to(roomId).emit('user-joined', {
       userId,
+      members: Array.from(room.members.values()),
       timestamp: Date.now(),
     });
   }
@@ -382,6 +383,7 @@ io.on('connection', (socket) => {
 
       socket.to(roomId).emit('user-left', {
         userId,
+        members: Array.from(activeRoom.members.values()),
         timestamp: Date.now(),
       });
     }

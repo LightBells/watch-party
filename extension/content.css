@@ -492,7 +492,7 @@
 }
 
 .watch-party-comment.animate {
-    animation: watchPartyCommentScroll var(--comment-duration, 8s) linear forwards;
+    animation: watchPartyCommentScroll var(--comment-duration, 15s) linear forwards;
     opacity: 1;
 }
 

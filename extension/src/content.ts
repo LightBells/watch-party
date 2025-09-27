@@ -54,6 +54,8 @@ class WatchPartyContent {
 
   private pendingVideoState: VideoState | null = null;
 
+  private members: RoomMember[] = [];
+
   private debugMode = false;
 
   private tabId: number | null = null;
@@ -75,6 +77,10 @@ class WatchPartyContent {
   private commentOverlay: HTMLDivElement | null = null;
 
   private overlayResizeObserver: ResizeObserver | null = null;
+
+  private videoEventListenersBoundElement: HTMLVideoElement | null = null;
+
+  private videoEventListenerCleanups: Array<() => void> = [];
 
   private readonly handleViewportChange = () => {
     window.requestAnimationFrame(() => this.updateCommentOverlayBounds());
@@ -113,12 +119,14 @@ class WatchPartyContent {
   private readonly serverUrl: string;
 
   private readonly selectors: string[] = [
+    '#dv-web-player video',
+    '.atvwebplayersdk-video-surface video',
     'video[data-testid="video-player"]',
     'video.dmp-video-player',
+    '.video-player video',
     'video#video-player',
     'video#test-video',
     'video',
-    '.video-player video',
   ];
 
   constructor() {
@@ -134,7 +142,6 @@ class WatchPartyContent {
   private async init(): Promise<void> {
     await this.loadDebugMode();
     await this.detectVideoElement();
-    this.setupVideoListeners();
     this.createWatchPartyUI();
     this.setupInteractionHandlers();
     this.setupMessageListener();
@@ -153,6 +160,89 @@ class WatchPartyContent {
     }
   }
 
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  private isViableVideoElement(element: HTMLVideoElement): boolean {
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 100 || rect.height < 60) {
+      return false;
+    }
+
+    if (!Number.isFinite(element.duration) && element.readyState === 0 && rect.width === 0) {
+      return false;
+    }
+
+    const hiddenContainer = element.closest('[aria-hidden="true"], [role="presentation"], [hidden]');
+    if (hiddenContainer) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private findVideoElementCandidate(
+    root: Document | ShadowRoot,
+    visited = new Set<Document | ShadowRoot>(),
+  ): HTMLVideoElement | null {
+    if (visited.has(root)) {
+      return null;
+    }
+
+    visited.add(root);
+
+    for (const selector of this.selectors) {
+      const elements = Array.from(root.querySelectorAll(selector));
+      for (const element of elements) {
+        if (element instanceof HTMLVideoElement && this.isViableVideoElement(element)) {
+          return element;
+        }
+      }
+    }
+
+    const fallbackVideos = Array.from(root.querySelectorAll('video')) as HTMLVideoElement[];
+    const viableFallback = fallbackVideos.find((video) => this.isViableVideoElement(video));
+    if (viableFallback) {
+      return viableFallback;
+    }
+
+    const elementsWithShadow = Array.from(root.querySelectorAll<HTMLElement>('*')).filter(
+      (element) => Boolean(element.shadowRoot),
+    );
+
+    for (const element of elementsWithShadow) {
+      const shadowRoot = element.shadowRoot;
+      if (!shadowRoot) {
+        continue;
+      }
+      const shadowVideo = this.findVideoElementCandidate(shadowRoot, visited);
+      if (shadowVideo) {
+        return shadowVideo;
+      }
+    }
+
+    const iframeElements = Array.from(root.querySelectorAll<HTMLIFrameElement>('iframe'));
+    for (const iframe of iframeElements) {
+      try {
+        const frameDocument = iframe.contentDocument ?? iframe.contentWindow?.document ?? null;
+        if (!frameDocument) {
+          continue;
+        }
+        const frameVideo = this.findVideoElementCandidate(frameDocument, visited);
+        if (frameVideo) {
+          return frameVideo;
+        }
+      } catch (error) {
+        this.log('Skipping iframe during video detection (likely cross-origin)', error);
+      }
+    }
+
+    return null;
+  }
+
   private log(...args: unknown[]): void {
     if (this.debugMode) {
       // eslint-disable-next-line no-console
@@ -163,36 +253,79 @@ class WatchPartyContent {
   private async detectVideoElement(): Promise<void> {
     this.log('🔍 Detecting video element...');
 
-    const videos = document.querySelectorAll<HTMLVideoElement>('video');
-    this.log('📍 Available video elements on page:', videos.length);
-    videos.forEach((video, index) => {
-      this.log(`   Video ${index}:`, video.id || video.className || 'no-id-or-class', video);
-    });
-
-    for (const selector of this.selectors) {
-      const element = document.querySelector(selector);
-      if (element instanceof HTMLVideoElement) {
-        this.videoElement = element;
-        this.log('✅ Video element found with selector:', selector, element);
-        this.log('📹 Video properties:', {
-          duration: element.duration,
-          currentTime: element.currentTime,
-          paused: element.paused,
-          readyState: element.readyState,
-        });
-        this.setupCommentOverlay();
-        this.flushPendingVideoState();
-        this.broadcastHostVideoState('video-ready');
-        return;
+    while (true) {
+      const candidate = this.findVideoElementCandidate(document);
+      if (candidate) {
+        this.handleVideoElementDetected(candidate);
+        break;
       }
 
-      this.log('❌ No video found with selector:', selector);
+      this.log('⏳ No video element found, retrying in 1 second...');
+      await this.delay(1000);
     }
 
-    this.log('⏳ No video element found, retrying in 1 second...');
-    window.setTimeout(() => {
-      void this.detectVideoElement();
-    }, 1000);
+    void this.monitorVideoElementChanges();
+  }
+
+  private handleVideoElementDetected(videoElement: HTMLVideoElement): void {
+    if (this.videoElement === videoElement) {
+      return;
+    }
+
+    this.teardownVideoListeners();
+
+    this.videoElement = videoElement;
+
+    this.log('✅ Video element bound:', videoElement);
+    this.log('📹 Video properties:', {
+      duration: videoElement.duration,
+      currentTime: videoElement.currentTime,
+      paused: videoElement.paused,
+      readyState: videoElement.readyState,
+    });
+
+    this.setupCommentOverlay();
+    this.flushPendingVideoState();
+    this.broadcastHostVideoState('video-ready');
+    this.setupVideoListeners(videoElement);
+  }
+
+  private async monitorVideoElementChanges(): Promise<void> {
+    while (true) {
+      await this.delay(1000);
+
+      const candidate = this.findVideoElementCandidate(document);
+
+      if (!candidate) {
+        if (this.videoElement) {
+          this.log('⚠️ Video element missing; awaiting replacement');
+          this.teardownVideoListeners();
+          this.videoElement = null;
+        }
+        continue;
+      }
+
+      if (candidate !== this.videoElement) {
+        this.handleVideoElementDetected(candidate);
+      }
+    }
+  }
+
+  private teardownVideoListeners(): void {
+    if (this.videoEventListenerCleanups.length === 0) {
+      this.videoEventListenersBoundElement = null;
+      return;
+    }
+
+    this.videoEventListenerCleanups.forEach((cleanup) => {
+      try {
+        cleanup();
+      } catch (error) {
+        this.log('Failed to remove video event listener', error);
+      }
+    });
+    this.videoEventListenerCleanups = [];
+    this.videoEventListenersBoundElement = null;
   }
 
   private enforcePauseWhileAwaiting(): void {
@@ -258,15 +391,20 @@ class WatchPartyContent {
     return true;
   }
 
-  private setupVideoListeners(): void {
-    if (!this.videoElement) {
-      this.log('❌ Cannot setup video listeners: no video element found');
+  private setupVideoListeners(video: HTMLVideoElement): void {
+    if (this.videoEventListenersBoundElement === video) {
       return;
     }
 
+    this.teardownVideoListeners();
+
     this.log('🎧 Setting up video event listeners...');
 
-    this.videoElement.addEventListener('play', () => {
+    const handlePlay = () => {
+      if (this.videoElement !== video) {
+        return;
+      }
+
       this.log('🎬 Play event detected!', {
         socketConnected: Boolean(this.socket?.connected),
         syncInProgress: this.syncInProgress,
@@ -275,14 +413,18 @@ class WatchPartyContent {
 
       if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
         this.socket.emit('play', {
-          currentTime: this.videoElement.currentTime,
+          currentTime: video.currentTime,
           userId: this.currentUser ?? undefined,
         });
         this.log('📤 Sent play event to server');
       }
-    });
+    };
 
-    this.videoElement.addEventListener('pause', () => {
+    const handlePause = () => {
+      if (this.videoElement !== video) {
+        return;
+      }
+
       this.log('⏸️ Pause event detected!', {
         socketConnected: Boolean(this.socket?.connected),
         syncInProgress: this.syncInProgress,
@@ -291,14 +433,18 @@ class WatchPartyContent {
 
       if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
         this.socket.emit('pause', {
-          currentTime: this.videoElement.currentTime,
+          currentTime: video.currentTime,
           userId: this.currentUser ?? undefined,
         });
         this.log('📤 Sent pause event to server');
       }
-    });
+    };
 
-    this.videoElement.addEventListener('seeked', () => {
+    const handleSeeked = () => {
+      if (this.videoElement !== video) {
+        return;
+      }
+
       this.log('⏭️ Seeked event detected!', {
         socketConnected: Boolean(this.socket?.connected),
         syncInProgress: this.syncInProgress,
@@ -308,14 +454,25 @@ class WatchPartyContent {
 
       if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
         this.socket.emit('sync', {
-          isPlaying: !this.videoElement.paused,
-          currentTime: this.videoElement.currentTime,
+          isPlaying: !video.paused,
+          currentTime: video.currentTime,
           userId: this.currentUser ?? undefined,
         });
         this.log('📤 Sent sync event to server');
       }
-    });
+    };
 
+    video.addEventListener('play', handlePlay, true);
+    video.addEventListener('pause', handlePause, true);
+    video.addEventListener('seeked', handleSeeked, true);
+
+    this.videoEventListenerCleanups = [
+      () => video.removeEventListener('play', handlePlay, true),
+      () => video.removeEventListener('pause', handlePause, true),
+      () => video.removeEventListener('seeked', handleSeeked, true),
+    ];
+
+    this.videoEventListenersBoundElement = video;
     this.log('✅ Video event listeners set up successfully');
   }
 
@@ -685,6 +842,8 @@ class WatchPartyContent {
   }
 
   private updateMembers(members: RoomMember[]): void {
+    this.members = [...members];
+
     const membersList = document.getElementById('wp-members-list');
     if (!membersList) {
       return;
@@ -692,7 +851,7 @@ class WatchPartyContent {
 
     membersList.innerHTML = '';
 
-    members.forEach((member) => {
+    this.members.forEach((member) => {
       const item = document.createElement('div');
       item.className = 'wp-member-item';
       item.textContent = member.username || member.id;
@@ -794,7 +953,18 @@ class WatchPartyContent {
       });
     });
 
-    this.socket.on('user-joined', (data: {userId: string; timestamp: number}) => {
+    this.socket.on('user-joined', (data: {userId: string; members: RoomMember[]; timestamp: number}) => {
+      this.updateMembers(data.members);
+
+      void chrome.runtime.sendMessage({
+        action: 'roomStateUpdate',
+        data: {
+          members: this.members,
+          isHost: this.isHost,
+          currentUrl: this.currentRoomUrl,
+        },
+      });
+
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
         data: {
@@ -810,7 +980,18 @@ class WatchPartyContent {
       }
     });
 
-    this.socket.on('user-left', (data: {userId: string; timestamp: number}) => {
+    this.socket.on('user-left', (data: {userId: string; members: RoomMember[]; timestamp: number}) => {
+      this.updateMembers(data.members);
+
+      void chrome.runtime.sendMessage({
+        action: 'roomStateUpdate',
+        data: {
+          members: this.members,
+          isHost: this.isHost,
+          currentUrl: this.currentRoomUrl,
+        },
+      });
+
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
         data: {
