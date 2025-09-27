@@ -259,12 +259,14 @@ io.on('connection', (socket) => {
     }
 
     const member = activeRoom.members.get(userId);
-    socket.to(roomId).emit('comment', {
+    const payload = {
       userId,
       username: member?.username,
       message: data.message,
       timestamp: Date.now(),
-    });
+    };
+
+    io.to(roomId).emit('comment', payload);
   });
 
   socket.on('play', (data) => {

@@ -785,7 +785,8 @@ class WatchPartyContent {
 
     this.socket.on('comment', (data: CommentPayload) => {
       this.log('Received comment:', data);
-      this.showComment(data.message, data.username || data.userId);
+      const isOwnComment = data.userId === this.currentUser;
+      this.showComment(data.message, data.username || data.userId, isOwnComment);
 
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
@@ -998,7 +999,7 @@ class WatchPartyContent {
     }, 300);
   }
 
-  private showComment(message: string, displayName: string): void {
+  private showComment(message: string, displayName: string, isOwnComment = false): void {
     const overlay = this.ensureCommentOverlay();
     if (!overlay) {
       return;
@@ -1007,7 +1008,10 @@ class WatchPartyContent {
     this.updateCommentOverlayBounds();
 
     const commentElement = document.createElement('div');
-    commentElement.className = 'watch-party-comment';
+    commentElement.classList.add('watch-party-comment');
+    if (isOwnComment) {
+      commentElement.classList.add('watch-party-comment--self');
+    }
     commentElement.innerHTML = `
       <span class=\"user\">${displayName}</span>: ${message}
     `;
