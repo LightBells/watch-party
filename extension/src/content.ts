@@ -52,13 +52,17 @@ class WatchPartyContent {
 
   private lastSyncTime = 0;
 
-  private pendingVideoState: { isPlaying: boolean; currentTime: number } | null = null;
+  private pendingVideoState: VideoState | null = null;
 
   private debugMode = false;
 
   private tabId: number | null = null;
 
   private navigationInProgress = false;
+
+  private initialVideoStateApplied = false;
+
+  private awaitingInitialState = false;
 
   private lastKnownUrl = window.location.href;
 
@@ -67,6 +71,14 @@ class WatchPartyContent {
   private authToken: string | null = null;
 
   private shareFeedbackTimeout: number | null = null;
+
+  private commentOverlay: HTMLDivElement | null = null;
+
+  private overlayResizeObserver: ResizeObserver | null = null;
+
+  private readonly handleViewportChange = () => {
+    window.requestAnimationFrame(() => this.updateCommentOverlayBounds());
+  };
 
   private lastBroadcastUrl: string | null = null;
 
@@ -98,10 +110,12 @@ class WatchPartyContent {
     await this.detectVideoElement();
     this.setupVideoListeners();
     this.createWatchPartyUI();
+    this.setupInteractionHandlers();
     this.setupMessageListener();
     this.monitorUrlChanges();
     await this.restoreRoomState();
     await this.handleDeepLink();
+    this.awaitingInitialState = !this.isHost;
   }
 
   private async loadDebugMode(): Promise<void> {
@@ -140,11 +154,9 @@ class WatchPartyContent {
           paused: element.paused,
           readyState: element.readyState,
         });
-        if (this.pendingVideoState) {
-          const pending = this.pendingVideoState;
-          this.pendingVideoState = null;
-          this.syncVideo(pending.isPlaying, pending.currentTime);
-        }
+        this.setupCommentOverlay();
+        this.flushPendingVideoState();
+        this.broadcastHostVideoState('video-ready');
         return;
       }
 
@@ -155,6 +167,37 @@ class WatchPartyContent {
     window.setTimeout(() => {
       void this.detectVideoElement();
     }, 1000);
+  }
+
+  private enforcePauseWhileAwaiting(): void {
+    if (!this.videoElement) {
+      return;
+    }
+
+    if (!this.videoElement.paused) {
+      this.log('🛑 Pausing local playback until room state arrives');
+      this.videoElement.pause();
+    }
+
+    window.setTimeout(() => {
+      if (this.awaitingInitialState && !this.videoElement?.paused) {
+        this.log('🛑 Secondary pause enforcement');
+        this.videoElement?.pause();
+      }
+    }, 250);
+  }
+
+  private setupInteractionHandlers(): void {
+    const attemptFlush = (): void => {
+      if (!this.pendingVideoState || this.syncInProgress) {
+        return;
+      }
+      this.log('🖱️ User interaction detected; retrying pending video sync');
+      this.flushPendingVideoState();
+    };
+
+    document.addEventListener('click', attemptFlush, true);
+    document.addEventListener('keydown', attemptFlush, true);
   }
 
   private setupMessageListener(): void {
@@ -169,6 +212,24 @@ class WatchPartyContent {
       }
       return true;
     });
+  }
+
+  private shouldEmitPlaybackEvents(): boolean {
+    if (this.isHost) {
+      return true;
+    }
+
+    if (this.awaitingInitialState) {
+      this.log('🚫 Suppressing playback event (awaiting host state)');
+      return false;
+    }
+
+    if (!this.initialVideoStateApplied) {
+      this.log('🚫 Suppressing playback event (initial state not applied)');
+      return false;
+    }
+
+    return true;
   }
 
   private setupVideoListeners(): void {
@@ -186,7 +247,7 @@ class WatchPartyContent {
         currentTime: this.videoElement?.currentTime,
       });
 
-      if (this.socket && this.socket.connected && !this.syncInProgress) {
+      if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
         this.socket.emit('play', {
           currentTime: this.videoElement.currentTime,
           userId: this.currentUser ?? undefined,
@@ -202,7 +263,7 @@ class WatchPartyContent {
         currentTime: this.videoElement?.currentTime,
       });
 
-      if (this.socket && this.socket.connected && !this.syncInProgress) {
+      if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
         this.socket.emit('pause', {
           currentTime: this.videoElement.currentTime,
           userId: this.currentUser ?? undefined,
@@ -219,7 +280,7 @@ class WatchPartyContent {
         paused: this.videoElement?.paused,
       });
 
-      if (this.socket && this.socket.connected && !this.syncInProgress) {
+      if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
         this.socket.emit('sync', {
           isPlaying: !this.videoElement.paused,
           currentTime: this.videoElement.currentTime,
@@ -456,6 +517,12 @@ class WatchPartyContent {
       this.currentUser = data.userId;
       this.username = username;
       this.isHost = data.isHost;
+      this.awaitingInitialState = !this.isHost;
+      this.initialVideoStateApplied = this.isHost;
+
+      if (!this.isHost) {
+        this.enforcePauseWhileAwaiting();
+      }
 
       if (this.isHost) {
         const shareUrl = this.ensureShareLink(data.roomId);
@@ -496,6 +563,8 @@ class WatchPartyContent {
     this.username = null;
     this.isHost = false;
     this.navigationInProgress = false;
+    this.awaitingInitialState = false;
+    this.initialVideoStateApplied = false;
     this.authToken = null;
     this.lastBroadcastUrl = null;
     this.currentRoomUrl = null;
@@ -612,6 +681,9 @@ class WatchPartyContent {
       this.showRoomInfo();
       if (this.isHost) {
         this.broadcastCurrentUrl();
+        this.broadcastHostVideoState('socket-connect');
+      } else {
+        this.flushPendingVideoState();
       }
     });
 
@@ -634,6 +706,7 @@ class WatchPartyContent {
 
       if (this.isHost) {
         this.ensureShareLink(this.currentRoom);
+        this.broadcastHostVideoState('room-state');
       }
 
       void chrome.runtime.sendMessage({
@@ -651,21 +724,21 @@ class WatchPartyContent {
     this.socket.on('play', (data: { currentTime: number; userId: string; timestamp: number }) => {
       this.log('📥 Received play event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
       if (data.userId !== this.currentUser) {
-        this.syncVideo(true, data.currentTime);
+        this.syncVideo(true, data.currentTime, data.timestamp);
       }
     });
 
     this.socket.on('pause', (data: { currentTime: number; userId: string; timestamp: number }) => {
       this.log('📥 Received pause event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
       if (data.userId !== this.currentUser) {
-        this.syncVideo(false, data.currentTime);
+        this.syncVideo(false, data.currentTime, data.timestamp);
       }
     });
 
     this.socket.on('sync', (data: { isPlaying: boolean; currentTime: number; userId: string; timestamp: number }) => {
       this.log('📥 Received sync event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
       if (data.userId !== this.currentUser) {
-        this.syncVideo(data.isPlaying, data.currentTime);
+        this.syncVideo(data.isPlaying, data.currentTime, data.timestamp);
       }
     });
 
@@ -688,6 +761,11 @@ class WatchPartyContent {
           timestamp: data.timestamp,
         },
       });
+
+      if (this.isHost) {
+        this.log('📡 Syncing state in response to new member join');
+        this.broadcastHostVideoState('user-joined');
+      }
     });
 
     this.socket.on('user-left', (data: { userId: string; timestamp: number }) => {
@@ -703,6 +781,7 @@ class WatchPartyContent {
 
     this.socket.on('host-changed', (data: { newHost: string; timestamp: number }) => {
       this.isHost = data.newHost === this.currentUser;
+      this.awaitingInitialState = !this.isHost && !this.initialVideoStateApplied;
       this.updateStatus(this.isHost ? 'ホスト' : 'メンバー');
 
       void chrome.runtime.sendMessage({
@@ -718,6 +797,7 @@ class WatchPartyContent {
 
       if (this.isHost) {
         this.ensureShareLink(this.currentRoom);
+        this.broadcastHostVideoState('host-changed');
       }
     });
 
@@ -731,80 +811,257 @@ class WatchPartyContent {
     });
   }
 
+  private flushPendingVideoState(): void {
+    if (!this.pendingVideoState) {
+      return;
+    }
+
+    if (!this.videoElement) {
+      this.log('⏳ Video element not ready; keeping pending state queued');
+      return;
+    }
+
+    const pending = this.pendingVideoState;
+    this.pendingVideoState = null;
+
+    this.syncVideo(pending.isPlaying, pending.currentTime, pending.lastUpdateTime);
+    this.awaitingInitialState = false;
+    this.initialVideoStateApplied = true;
+  }
+
+  private broadcastHostVideoState(reason: string): void {
+    if (!this.isHost || !this.socket?.connected || !this.videoElement) {
+      return;
+    }
+
+    const payload = {
+      isPlaying: !this.videoElement.paused,
+      currentTime: this.videoElement.currentTime,
+      userId: this.currentUser ?? undefined,
+    };
+
+    this.log(`📡 Broadcasting host video state (${reason})`, payload);
+    this.socket.emit('sync', payload);
+  }
+
   private applyRoomVideoState(videoState?: VideoState | null): void {
     if (!videoState) {
       return;
     }
 
-    const now = Date.now();
-    let targetTime = videoState.currentTime;
-
-    if (videoState.isPlaying) {
-      const elapsedSeconds = (now - videoState.lastUpdateTime) / 1000;
-      if (elapsedSeconds > 0) {
-        targetTime += elapsedSeconds;
-      }
+    if (this.isHost) {
+      this.log('⚠️ Skipping room video state apply because this tab is host');
+      return;
     }
 
-    const video = this.videoElement;
-    if (video && Number.isFinite(video.duration) && video.duration > 0) {
-      targetTime = Math.min(targetTime, video.duration);
+    this.pendingVideoState = { ...videoState };
+    this.awaitingInitialState = true;
+    this.enforcePauseWhileAwaiting();
+
+    this.flushPendingVideoState();
+    if (this.initialVideoStateApplied) {
+      this.awaitingInitialState = false;
     }
-
-    targetTime = Math.max(0, targetTime);
-
-    this.syncVideo(videoState.isPlaying, targetTime);
   }
 
-  private syncVideo(isPlaying: boolean, currentTime: number): void {
-    this.log('🔄 Attempting to sync video:', { isPlaying, currentTime });
+  private syncVideo(isPlaying: boolean, currentTime: number, lastUpdateTime = Date.now()): void {
+    this.log('🔄 Attempting to sync video:', { isPlaying, currentTime, lastUpdateTime });
 
     if (!this.videoElement) {
       this.log('❌ Cannot sync: no video element');
-      this.pendingVideoState = { isPlaying, currentTime };
+      this.pendingVideoState = { isPlaying, currentTime, lastUpdateTime };
+      this.awaitingInitialState = true;
       return;
     }
 
     if (this.syncInProgress) {
-      this.log('⏳ Sync already in progress, skipping');
+      this.log('⏳ Sync already in progress, queueing latest state');
+      this.pendingVideoState = { isPlaying, currentTime, lastUpdateTime };
+      this.awaitingInitialState = this.awaitingInitialState || !this.initialVideoStateApplied;
       return;
     }
 
     this.syncInProgress = true;
     this.pendingVideoState = null;
+    this.initialVideoStateApplied = true;
+    this.awaitingInitialState = false;
 
-    const currentVideoTime = this.videoElement.currentTime;
-    const timeDiff = Math.abs(currentVideoTime - currentTime);
-
-    if (timeDiff > 1) {
-      this.videoElement.currentTime = currentTime;
+    let targetTime = currentTime;
+    if (isPlaying) {
+      const elapsedSinceUpdate = (Date.now() - lastUpdateTime) / 1000;
+      if (elapsedSinceUpdate > 0) {
+        targetTime += elapsedSinceUpdate;
+      }
     }
 
-    if (isPlaying && this.videoElement.paused) {
-      void this.videoElement.play().catch((error) => {
-        this.log('❌ Play failed:', error);
-      });
-    } else if (!isPlaying && !this.videoElement.paused) {
-      this.videoElement.pause();
+    if (Number.isFinite(this.videoElement.duration) && this.videoElement.duration > 0) {
+      targetTime = Math.min(targetTime, this.videoElement.duration);
+    }
+
+    targetTime = Math.max(0, targetTime);
+
+    const currentVideoTime = this.videoElement.currentTime;
+    const timeDiff = Math.abs(currentVideoTime - targetTime);
+
+    if (timeDiff > 1) {
+      this.videoElement.currentTime = targetTime;
+    }
+
+    if (isPlaying) {
+      const wasMuted = this.videoElement.muted;
+      if (this.videoElement.paused) {
+        if (!wasMuted) {
+          this.videoElement.muted = true;
+        }
+        void this.videoElement
+          .play()
+          .then(() => {
+            if (!wasMuted) {
+              this.videoElement.muted = false;
+            }
+          })
+          .catch((error) => {
+            this.log('❌ Play failed:', error);
+            if (!wasMuted) {
+              this.videoElement.muted = wasMuted;
+            }
+            this.pendingVideoState = {
+              isPlaying,
+              currentTime: this.videoElement?.currentTime ?? targetTime,
+              lastUpdateTime: Date.now(),
+            };
+          });
+      }
+
+      window.setTimeout(() => {
+        if (!wasMuted && this.videoElement) {
+          this.videoElement.muted = false;
+        }
+      }, 0);
+    } else {
+      if (!this.videoElement.paused) {
+        this.videoElement.pause();
+      }
+
+      window.setTimeout(() => {
+        if (!this.videoElement?.paused) {
+          this.log('⏹️ Pause enforcement retry');
+          this.videoElement?.pause();
+        }
+      }, 200);
     }
 
     window.setTimeout(() => {
       this.syncInProgress = false;
-    }, 1000);
+      this.flushPendingVideoState();
+    }, 300);
   }
 
   private showComment(message: string, displayName: string): void {
+    const overlay = this.ensureCommentOverlay();
+    if (!overlay) {
+      return;
+    }
+
+    this.updateCommentOverlayBounds();
+
     const commentElement = document.createElement('div');
     commentElement.className = 'watch-party-comment';
     commentElement.innerHTML = `
-      <span class="user">${displayName}</span>: ${message}
+      <span class=\"user\">${displayName}</span>: ${message}
     `;
 
-    document.body.appendChild(commentElement);
+    overlay.appendChild(commentElement);
 
-    window.setTimeout(() => {
-      commentElement.remove();
-    }, 5000);
+    const overlayHeight =
+      overlay.clientHeight || this.videoElement?.clientHeight || window.innerHeight;
+    const commentHeight = commentElement.offsetHeight || 24;
+    const maxTop = Math.max(overlayHeight - commentHeight, 0);
+    const randomTop = Math.floor(Math.random() * (maxTop + 1));
+    commentElement.style.top = `${randomTop}px`;
+
+    const commentWidth =
+      commentElement.getBoundingClientRect().width || commentElement.scrollWidth || commentElement.offsetWidth || 0;
+    const overlayWidth =
+      overlay.clientWidth || this.videoElement?.clientWidth || Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+    const travelDistance = Math.max(overlayWidth, window.innerWidth) + commentWidth;
+    commentElement.style.setProperty('--comment-travel', `${travelDistance}px`);
+
+    const textLength = (message?.length ?? 0) + (displayName?.length ?? 0);
+    const baseDuration = Math.min(14, Math.max(6, 6 + textLength * 0.1));
+    const duration = Math.max(3, baseDuration / 2);
+    commentElement.style.setProperty('--comment-duration', `${duration}s`);
+
+    void commentElement.offsetWidth;
+    commentElement.classList.add('animate');
+
+    commentElement.addEventListener(
+      'animationend',
+      () => {
+        commentElement.remove();
+      },
+      { once: true },
+    );
+  }
+
+  private setupCommentOverlay(): void {
+    const overlay = this.ensureCommentOverlay();
+    if (!overlay) {
+      return;
+    }
+
+    this.updateCommentOverlayBounds();
+
+    if (this.videoElement && typeof ResizeObserver !== 'undefined') {
+      if (!this.overlayResizeObserver) {
+        this.overlayResizeObserver = new ResizeObserver(() => {
+          this.updateCommentOverlayBounds();
+        });
+      }
+      this.overlayResizeObserver.disconnect();
+      this.overlayResizeObserver.observe(this.videoElement);
+    }
+  }
+
+  private ensureCommentOverlay(): HTMLDivElement | null {
+    if (this.commentOverlay && document.body.contains(this.commentOverlay)) {
+      return this.commentOverlay;
+    }
+
+    if (!document.body) {
+      return null;
+    }
+
+    if (!this.commentOverlay) {
+      this.commentOverlay = document.createElement('div');
+      this.commentOverlay.id = 'wp-comment-overlay';
+      this.commentOverlay.className = 'wp-comment-overlay';
+      window.addEventListener('resize', this.handleViewportChange);
+      window.addEventListener('scroll', this.handleViewportChange);
+    }
+
+    document.body.appendChild(this.commentOverlay);
+    return this.commentOverlay;
+  }
+
+  private updateCommentOverlayBounds(): void {
+    const overlay = this.commentOverlay;
+    if (!overlay) {
+      return;
+    }
+
+    const rect = this.videoElement?.getBoundingClientRect();
+    if (rect) {
+      overlay.style.top = `${rect.top + window.scrollY}px`;
+      overlay.style.left = `${rect.left + window.scrollX}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+    } else {
+      overlay.style.top = '0';
+      overlay.style.left = '0';
+      overlay.style.width = '100vw';
+      overlay.style.height = '100vh';
+    }
   }
 
   private async getStoredUsername(): Promise<string | null> {
@@ -908,6 +1165,11 @@ class WatchPartyContent {
       this.currentUser = userId;
       this.username = username ?? null;
       this.isHost = isHostRaw ?? this.isHost;
+      this.awaitingInitialState = !this.isHost;
+      this.initialVideoStateApplied = this.isHost;
+      if (!this.isHost) {
+        this.enforcePauseWhileAwaiting();
+      }
       this.authToken = token;
       return token;
     }
