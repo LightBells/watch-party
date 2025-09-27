@@ -307,12 +307,19 @@
     right: 0;
     z-index: 10000;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    --wp-comment-panel-min-width: 360px;
+    --wp-comment-panel-max-width: min(520px, 60vw);
 }
 
 .wp-comment-toggle {
     display: flex;
-    justify-content: flex-end;
-    margin-bottom: 0;
+    justify-content: center;
+    align-items: center;
+    margin-right: -1px;
+    height: 50px;
 }
 
 .wp-toggle-btn {
@@ -324,13 +331,13 @@
     cursor: pointer;
     display: flex;
     justify-content: center;
+    align-items: center;
     font-size: 16px;
     font-weight: 500;
     letter-spacing: 0.02em;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    transform: translateX(0);
     width: 50px;
     height: 50px;
     position: relative;
@@ -346,7 +353,6 @@
 
 .wp-toggle-btn.open {
     border-radius: 20px 0 0 20px;
-    transform: translateX(-270px);
     background: rgba(0, 123, 255, 0.6);
 }
 
@@ -367,17 +373,17 @@
     background: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(233, 236, 239, 0.6);
-    border-radius: 0;
-    padding: 0;
+    border-radius: 0 16px 16px 0;
+    padding: 0 16px;
     animation: panelSlideLeft 0.3s ease-out;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-    width: 270px;
-    position: absolute;
-    right: 0px;
-    top: 0;
-    height: 50px;
+    width: fit-content;
+    min-width: var(--wp-comment-panel-min-width);
+    max-width: var(--wp-comment-panel-max-width);
     display: flex;
+    align-items: center;
     box-sizing: border-box;
+    height: 50px;
 }
 
 .wp-comment-panel.hidden {
@@ -397,13 +403,19 @@
 
 .wp-comment-form {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 12px;
     width: 100%;
-    padding: 0 16px;
+}
+
+.wp-comment-form .wp-btn {
+    flex: 0 0 auto;
 }
 
 #wp-comment-text {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 160px;
+    max-width: 100%;
     padding: 0 12px;
     border: 2px solid rgba(233, 236, 239, 0.6);
     border-radius: 20px;
@@ -412,7 +424,7 @@
     transition: border-color 0.2s ease;
     background: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(5px);
-    height: 38px;
+    height: 36px;
     box-sizing: border-box;
 }
 
@@ -434,7 +446,7 @@
     transition: background-color 0.2s ease;
     white-space: nowrap;
     backdrop-filter: blur(5px);
-    height: 34px;
+    height: 36px;
 }
 
 #wp-send-comment:hover {

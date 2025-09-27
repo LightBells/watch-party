@@ -1,4 +1,4 @@
-import { io, Socket } from 'socket.io-client';
+import {io, Socket} from 'socket.io-client';
 
 type VideoState = {
   isPlaying: boolean;
@@ -80,6 +80,32 @@ class WatchPartyContent {
     window.requestAnimationFrame(() => this.updateCommentOverlayBounds());
   };
 
+  private readonly interceptCommentInputKeyEvent = (event: KeyboardEvent): void => {
+    const commentInput = this.getInput('wp-comment-text');
+    if (!commentInput) {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    if (activeElement !== commentInput) {
+      return;
+    }
+
+    if (
+      event.type === 'keydown' &&
+      (event.key === 'Enter' || event.key === 'NumpadEnter') &&
+      !event.repeat
+    ) {
+      event.preventDefault();
+      this.sendComment();
+    }
+
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+  };
+
+  private commentInputProtectionInitialized = false;
+
   private lastBroadcastUrl: string | null = null;
 
   private currentRoomUrl: string | null = null;
@@ -120,7 +146,7 @@ class WatchPartyContent {
 
   private async loadDebugMode(): Promise<void> {
     try {
-      const result = (await chrome.storage.local.get(['debugMode'])) as { debugMode?: boolean };
+      const result = (await chrome.storage.local.get(['debugMode'])) as {debugMode?: boolean};
       this.debugMode = Boolean(result.debugMode);
     } catch (error) {
       this.debugMode = false;
@@ -350,7 +376,7 @@ class WatchPartyContent {
     commentInput.innerHTML = `
       <div class="wp-comment-toggle">
         <button id="wp-toggle-comment" class="wp-toggle-btn">
-          <span class="wp-toggle-icon">‹</span>
+          <span class="wp-toggle-icon">›</span>
         </button>
       </div>
       <div class="wp-comment-panel hidden" id="wp-comment-panel">
@@ -385,12 +411,7 @@ class WatchPartyContent {
     const sendCommentBtn = document.getElementById('wp-send-comment');
     sendCommentBtn?.addEventListener('click', () => this.sendComment());
 
-    const commentInput = this.getInput('wp-comment-text');
-    commentInput?.addEventListener('keypress', (event: KeyboardEvent) => {
-      if (event.key === 'Enter') {
-        this.sendComment();
-      }
-    });
+    this.setupCommentInputProtection();
 
     document.addEventListener('click', (event) => {
       const popup = document.getElementById('wp-room-popup');
@@ -406,6 +427,26 @@ class WatchPartyContent {
         }
       }
     });
+  }
+
+  private setupCommentInputProtection(): void {
+    if (this.commentInputProtectionInitialized) {
+      return;
+    }
+
+    const commentInput = this.getInput('wp-comment-text');
+    if (!commentInput) {
+      return;
+    }
+
+    const eventTypes: Array<'keydown'> = ['keydown'];
+
+    eventTypes.forEach((eventType) => {
+      window.addEventListener(eventType, this.interceptCommentInputKeyEvent, true);
+      document.addEventListener(eventType, this.interceptCommentInputKeyEvent, true);
+    });
+
+    this.commentInputProtectionInitialized = true;
   }
 
   private toggleRoomPopup(): void {
@@ -465,7 +506,7 @@ class WatchPartyContent {
     await this.joinRoomById(roomId);
   }
 
-  private async joinRoomById(roomId: string, options: { silent?: boolean } = {}): Promise<void> {
+  private async joinRoomById(roomId: string, options: {silent?: boolean} = {}): Promise<void> {
     if (!roomId) {
       return;
     }
@@ -493,7 +534,7 @@ class WatchPartyContent {
 
       const response = await fetch(`${this.serverUrl}/api/join-room`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(requestBody),
       });
 
@@ -586,7 +627,7 @@ class WatchPartyContent {
     }
 
     if (this.socket?.connected) {
-      this.socket.emit('comment', { message });
+      this.socket.emit('comment', {message});
       if (commentInput) {
         commentInput.value = '';
       }
@@ -670,7 +711,7 @@ class WatchPartyContent {
     this.authToken = token;
 
     this.socket = io(this.serverUrl, {
-      auth: { token },
+      auth: {token},
       transports: ['polling'],
     });
 
@@ -721,21 +762,21 @@ class WatchPartyContent {
       void this.persistRoomState();
     });
 
-    this.socket.on('play', (data: { currentTime: number; userId: string; timestamp: number }) => {
+    this.socket.on('play', (data: {currentTime: number; userId: string; timestamp: number}) => {
       this.log('📥 Received play event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
       if (data.userId !== this.currentUser) {
         this.syncVideo(true, data.currentTime, data.timestamp);
       }
     });
 
-    this.socket.on('pause', (data: { currentTime: number; userId: string; timestamp: number }) => {
+    this.socket.on('pause', (data: {currentTime: number; userId: string; timestamp: number}) => {
       this.log('📥 Received pause event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
       if (data.userId !== this.currentUser) {
         this.syncVideo(false, data.currentTime, data.timestamp);
       }
     });
 
-    this.socket.on('sync', (data: { isPlaying: boolean; currentTime: number; userId: string; timestamp: number }) => {
+    this.socket.on('sync', (data: {isPlaying: boolean; currentTime: number; userId: string; timestamp: number}) => {
       this.log('📥 Received sync event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
       if (data.userId !== this.currentUser) {
         this.syncVideo(data.isPlaying, data.currentTime, data.timestamp);
@@ -752,7 +793,7 @@ class WatchPartyContent {
       });
     });
 
-    this.socket.on('user-joined', (data: { userId: string; timestamp: number }) => {
+    this.socket.on('user-joined', (data: {userId: string; timestamp: number}) => {
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
         data: {
@@ -768,7 +809,7 @@ class WatchPartyContent {
       }
     });
 
-    this.socket.on('user-left', (data: { userId: string; timestamp: number }) => {
+    this.socket.on('user-left', (data: {userId: string; timestamp: number}) => {
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
         data: {
@@ -779,7 +820,7 @@ class WatchPartyContent {
       });
     });
 
-    this.socket.on('host-changed', (data: { newHost: string; timestamp: number }) => {
+    this.socket.on('host-changed', (data: {newHost: string; timestamp: number}) => {
       this.isHost = data.newHost === this.currentUser;
       this.awaitingInitialState = !this.isHost && !this.initialVideoStateApplied;
       this.updateStatus(this.isHost ? 'ホスト' : 'メンバー');
@@ -854,7 +895,7 @@ class WatchPartyContent {
       return;
     }
 
-    this.pendingVideoState = { ...videoState };
+    this.pendingVideoState = {...videoState};
     this.awaitingInitialState = true;
     this.enforcePauseWhileAwaiting();
 
@@ -865,18 +906,18 @@ class WatchPartyContent {
   }
 
   private syncVideo(isPlaying: boolean, currentTime: number, lastUpdateTime = Date.now()): void {
-    this.log('🔄 Attempting to sync video:', { isPlaying, currentTime, lastUpdateTime });
+    this.log('🔄 Attempting to sync video:', {isPlaying, currentTime, lastUpdateTime});
 
     if (!this.videoElement) {
       this.log('❌ Cannot sync: no video element');
-      this.pendingVideoState = { isPlaying, currentTime, lastUpdateTime };
+      this.pendingVideoState = {isPlaying, currentTime, lastUpdateTime};
       this.awaitingInitialState = true;
       return;
     }
 
     if (this.syncInProgress) {
       this.log('⏳ Sync already in progress, queueing latest state');
-      this.pendingVideoState = { isPlaying, currentTime, lastUpdateTime };
+      this.pendingVideoState = {isPlaying, currentTime, lastUpdateTime};
       this.awaitingInitialState = this.awaitingInitialState || !this.initialVideoStateApplied;
       return;
     }
@@ -1000,7 +1041,7 @@ class WatchPartyContent {
       () => {
         commentElement.remove();
       },
-      { once: true },
+      {once: true},
     );
   }
 
@@ -1066,7 +1107,7 @@ class WatchPartyContent {
 
   private async getStoredUsername(): Promise<string | null> {
     try {
-      const result = (await chrome.storage.local.get(['globalUsername'])) as { globalUsername?: string };
+      const result = (await chrome.storage.local.get(['globalUsername'])) as {globalUsername?: string};
       return result.globalUsername ?? null;
     } catch (error) {
       this.log('Failed to load username', error);
@@ -1268,7 +1309,7 @@ class WatchPartyContent {
       return;
     }
 
-    await this.joinRoomById(roomFromUrl, { silent: true });
+    await this.joinRoomById(roomFromUrl, {silent: true});
   }
 
   private navigateToUrl(targetUrl: string): void {
@@ -1466,7 +1507,7 @@ class WatchPartyContent {
     this.lastBroadcastUrl = urlToSend;
     this.currentRoomUrl = urlToSend;
     this.log('🌐 Broadcasting current URL:', urlToSend);
-    this.socket.emit('navigate', { url: urlToSend });
+    this.socket.emit('navigate', {url: urlToSend});
   }
 
   private updateShareControls(forceVisible?: boolean): void {
@@ -1526,8 +1567,8 @@ class WatchPartyContent {
     }
 
     try {
-      const response = (await chrome.runtime.sendMessage({ action: 'getTabId' })) as
-        | { tabId?: number | null }
+      const response = (await chrome.runtime.sendMessage({action: 'getTabId'})) as
+        | {tabId?: number | null}
         | undefined;
 
       if (response && typeof response.tabId === 'number') {
