@@ -30,6 +30,8 @@ Frontendには、Google Chromeの拡張を利用し、Prime Video, dアニメス
 - **Play**: 再生開始
 - **Stop**: 再生停止
 - **Sync**: 時間同期
+- **Navigate**: ページ移動同期
+- **DeepLink**: 共有URLからの自動ルーム参加 (例: `...#watchparty-room=ROOMID`)
 
 ### 認証フロー
 
@@ -50,3 +52,9 @@ Frontendには、Google Chromeの拡張を利用し、Prime Video, dアニメス
 ## ライセンス
 
 MIT License
+
+## 技術スタックアップデート
+
+- バックエンドは TypeScript + Express + Socket.IO で構成され、`npm run build:server` で `dist/server` にトランスパイルされます。
+- Chrome 拡張機能も TypeScript 化され、Webpack で `extension/dist` にバンドルされます。
+- 開発時は `npm run dev` (サーバー) や `npm run build:extension -- --watch` を利用すると効率的です。
