@@ -97,6 +97,12 @@ class WatchPartyContent {
       return;
     }
 
+    if (event.isComposing || event.key === 'Process') {
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+      return;
+    }
+
     if (
       event.type === 'keydown' &&
       (event.key === 'Enter' || event.key === 'NumpadEnter') &&

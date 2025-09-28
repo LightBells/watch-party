@@ -33,6 +33,10 @@ class WatchPartyUsernamePopup {
       void this.saveUsername();
     });
     this.usernameInput.addEventListener('keypress', (event) => {
+      if (event.isComposing) {
+        return;
+      }
+
       if (event.key === 'Enter' && !this.saveButton.disabled) {
         void this.saveUsername();
       }
