@@ -116,6 +116,8 @@ class WatchPartyContent {
 
   private currentRoomUrl: string | null = null;
 
+  private hostUrlHeartbeatId: number | null = null;
+
   private readonly serverUrl: string;
 
   private readonly selectors: string[] = [
@@ -248,6 +250,74 @@ class WatchPartyContent {
       // eslint-disable-next-line no-console
       console.log(...args);
     }
+  }
+
+  private debugNavigation(event: string, context: Record<string, unknown> = {}): void {
+    const payload = {
+      ...context,
+      timestamp: new Date().toISOString(),
+    };
+
+    // eslint-disable-next-line no-console
+    console.info(`[WatchParty][Nav] ${event}`, payload);
+    this.log(`[Nav] ${event}`, payload);
+  }
+
+  private updateHostHeartbeat(): void {
+    if (this.isHost) {
+      this.startHostUrlHeartbeat();
+    } else {
+      this.stopHostUrlHeartbeat();
+    }
+  }
+
+  private startHostUrlHeartbeat(): void {
+    if (this.hostUrlHeartbeatId !== null) {
+      return;
+    }
+
+    this.debugNavigation('hostHeartbeat:start');
+    this.hostUrlHeartbeatId = window.setInterval(() => {
+      if (!this.isHost || !this.socket?.connected || !this.currentRoom) {
+        return;
+      }
+
+      if (this.navigationInProgress) {
+        return;
+      }
+
+      const shareCandidate = this.applyRoomParamToUrl(window.location.href, this.currentRoom);
+      const lastBroadcastUrl = this.lastBroadcastUrl;
+      const urlsEquivalent = lastBroadcastUrl
+        ? this.urlsEquivalentForSync(shareCandidate, lastBroadcastUrl)
+        : false;
+
+      this.debugNavigation('hostHeartbeat:tick', {
+        shareCandidate,
+        lastBroadcastUrl,
+        urlsEquivalent,
+      });
+
+      if (urlsEquivalent) {
+        return;
+      }
+
+      this.debugNavigation('hostHeartbeat:rebroadcast', {
+        shareCandidate,
+        lastBroadcastUrl,
+      });
+      this.broadcastCurrentUrl(shareCandidate);
+    }, 2000);
+  }
+
+  private stopHostUrlHeartbeat(): void {
+    if (this.hostUrlHeartbeatId === null) {
+      return;
+    }
+
+    this.debugNavigation('hostHeartbeat:stop');
+    window.clearInterval(this.hostUrlHeartbeatId);
+    this.hostUrlHeartbeatId = null;
   }
 
   private async detectVideoElement(): Promise<void> {
@@ -717,6 +787,7 @@ class WatchPartyContent {
       this.isHost = data.isHost;
       this.awaitingInitialState = !this.isHost;
       this.initialVideoStateApplied = this.isHost;
+      this.updateHostHeartbeat();
 
       if (!this.isHost) {
         this.enforcePauseWhileAwaiting();
@@ -760,6 +831,7 @@ class WatchPartyContent {
     this.currentUser = null;
     this.username = null;
     this.isHost = false;
+    this.stopHostUrlHeartbeat();
     this.navigationInProgress = false;
     this.awaitingInitialState = false;
     this.initialVideoStateApplied = false;
@@ -875,6 +947,11 @@ class WatchPartyContent {
     });
 
     this.socket.on('connect', () => {
+      this.debugNavigation('socket:connect', {
+        roomId: this.currentRoom,
+        userId: this.currentUser,
+        isHost: this.isHost,
+      });
       this.log('🔗 Connected to room:', this.currentRoom);
       this.log('👤 User ID:', this.currentUser);
       this.updateStatus('接続中');
@@ -888,13 +965,24 @@ class WatchPartyContent {
     });
 
     this.socket.on('disconnect', () => {
+      this.debugNavigation('socket:disconnect', {
+        roomId: this.currentRoom,
+        userId: this.currentUser,
+      });
+      this.stopHostUrlHeartbeat();
       this.log('Disconnected from room');
       this.updateStatus('切断');
     });
 
     this.socket.on('room-state', (data: RoomStatePayload) => {
+      this.debugNavigation('socket:room-state', {
+        isHost: data.isHost,
+        currentUrl: data.currentUrl ?? null,
+        memberCount: data.members.length,
+      });
       this.log('🏠 Room state received:', data);
       this.isHost = data.isHost;
+      this.updateHostHeartbeat();
       this.log('👑 Host status updated:', this.isHost ? 'HOST' : 'MEMBER');
       this.updateStatus(this.isHost ? 'ホスト' : 'メンバー');
       this.updateMembers(data.members);
@@ -1003,7 +1091,14 @@ class WatchPartyContent {
     });
 
     this.socket.on('host-changed', (data: {newHost: string; timestamp: number}) => {
-      this.isHost = data.newHost === this.currentUser;
+      const becameHost = data.newHost === this.currentUser;
+      this.debugNavigation('socket:host-changed', {
+        newHost: data.newHost,
+        currentUser: this.currentUser,
+        becameHost,
+      });
+      this.isHost = becameHost;
+      this.updateHostHeartbeat();
       this.awaitingInitialState = !this.isHost && !this.initialVideoStateApplied;
       this.updateStatus(this.isHost ? 'ホスト' : 'メンバー');
 
@@ -1025,6 +1120,11 @@ class WatchPartyContent {
     });
 
     this.socket.on('navigate', (data: NavigateEventPayload) => {
+      this.debugNavigation('socket:navigate', {
+        dataUrl: data.url,
+        dataUserId: data.userId,
+        currentUser: this.currentUser,
+      });
       this.log('📥 Received navigate event:', data);
       if (data.userId === this.currentUser) {
         return;
@@ -1364,6 +1464,8 @@ class WatchPartyContent {
       this.lastBroadcastUrl = null;
     }
 
+    this.updateHostHeartbeat();
+
     await this.connectToRoom(token);
     this.updateShareControls(true);
   }
@@ -1404,10 +1506,22 @@ class WatchPartyContent {
   }
 
   private monitorUrlChanges(): void {
+    this.debugNavigation('monitorUrlChanges:init', {
+      locationHref: window.location.href,
+      historyPatched: WatchPartyContent.historyPatched,
+    });
+
     this.lastKnownUrl = window.location.href;
 
-    const handleChange = () => {
-      void this.onUrlChanged(window.location.href);
+    const handleChange = (source: string) => {
+      const href = window.location.href;
+      this.debugNavigation('monitorUrlChanges:detected', {
+        source,
+        href,
+        lastKnownUrl: this.lastKnownUrl,
+        navigationInProgress: this.navigationInProgress,
+      });
+      void this.onUrlChanged(href);
     };
 
     if (!WatchPartyContent.historyPatched) {
@@ -1415,17 +1529,20 @@ class WatchPartyContent {
         const original = history[method] as typeof history.pushState;
         history[method] = function (...args: Parameters<typeof history.pushState>) {
           const result = original.apply(this, args);
-          handleChange();
+          const event = new Event(`watchparty:${method}`);
+          window.dispatchEvent(event);
           return result;
         } as typeof history.pushState;
+        window.addEventListener(`watchparty:${method}`, () => handleChange(`history:${method}`));
       };
 
       wrapHistoryMethod('pushState');
       wrapHistoryMethod('replaceState');
       WatchPartyContent.historyPatched = true;
+      this.debugNavigation('monitorUrlChanges:history-patched', {});
     }
 
-    window.addEventListener('popstate', handleChange);
+    window.addEventListener('popstate', () => handleChange('popstate'));
 
     if (this.urlObserverId !== null) {
       window.clearInterval(this.urlObserverId);
@@ -1433,43 +1550,130 @@ class WatchPartyContent {
 
     this.urlObserverId = window.setInterval(() => {
       if (window.location.href !== this.lastKnownUrl) {
-        handleChange();
+        handleChange('interval');
       }
     }, 1000);
   }
 
   private async onUrlChanged(newUrl: string): Promise<void> {
-    if (newUrl === this.lastKnownUrl) {
+    this.debugNavigation('onUrlChanged:trigger', {
+      newUrl,
+      lastKnownUrl: this.lastKnownUrl,
+      navigationInProgress: this.navigationInProgress,
+      isHost: this.isHost,
+      socketConnected: Boolean(this.socket?.connected),
+      currentRoomUrl: this.currentRoomUrl,
+      currentRoom: this.currentRoom,
+    });
+
+    if (this.navigationInProgress && newUrl === this.lastKnownUrl) {
+      this.navigationInProgress = false;
+      this.debugNavigation('onUrlChanged:skip-sync-same', {newUrl});
+      this.log('🔁 Navigation completed from sync; skipping broadcast');
       return;
     }
 
-    this.lastKnownUrl = newUrl;
+    if (newUrl === this.lastKnownUrl) {
+      this.debugNavigation('onUrlChanged:skip-nochange', {newUrl});
+      return;
+    }
+
+    const previousUrl = this.lastKnownUrl;
+    const normalizedNewUrl = this.normalizeUrlForComparison(newUrl);
 
     if (this.navigationInProgress) {
       this.navigationInProgress = false;
+      this.lastKnownUrl = newUrl;
+      this.currentRoomUrl = this.currentRoom
+        ? this.applyRoomParamToUrl(newUrl, this.currentRoom)
+        : newUrl;
+      this.debugNavigation('onUrlChanged:sync-complete', {
+        newUrl,
+        currentRoomUrl: this.currentRoomUrl,
+      });
       this.log('🔁 Navigation completed from sync; skipping broadcast');
       return;
     }
 
     if (!this.socket?.connected) {
       if (!this.isHost) {
+        const expectedUrl = this.currentRoomUrl ?? previousUrl;
+        if (expectedUrl) {
+          const normalizedExpected = this.normalizeUrlForComparison(expectedUrl);
+          const urlsEquivalent = this.urlsMatchForSync(expectedUrl, newUrl);
+          if (!urlsEquivalent) {
+            this.debugNavigation('onUrlChanged:restore-while-disconnected', {
+              expectedUrl,
+              normalizedExpected,
+              normalizedNewUrl,
+              urlsEquivalent,
+            });
+            this.log('🔄 Restoring host URL while disconnected');
+            this.syncRoomUrl(expectedUrl);
+            return;
+          }
+        }
+
+        this.debugNavigation('onUrlChanged:handle-deeplink-disconnected', {newUrl});
         await this.handleDeepLink();
       }
+
+      this.lastKnownUrl = newUrl;
       return;
     }
 
     if (!this.isHost) {
-      this.log('🙅‍♀️ Ignoring URL change (not host)');
+      const expectedUrl = this.currentRoomUrl ?? previousUrl;
+      if (expectedUrl) {
+        const normalizedExpected = this.normalizeUrlForComparison(expectedUrl);
+        const urlsEquivalent = this.urlsMatchForSync(expectedUrl, newUrl);
+        if (!urlsEquivalent) {
+          if (this.socket?.connected && this.currentRoom) {
+            this.debugNavigation('onUrlChanged:member-initiate-navigation', {
+              expectedUrl,
+              normalizedExpected,
+              normalizedNewUrl,
+              urlsEquivalent,
+            });
+            this.requestMemberNavigation(newUrl);
+            return;
+          }
+
+          this.debugNavigation('onUrlChanged:member-resync', {
+            expectedUrl,
+            normalizedExpected,
+            normalizedNewUrl,
+            urlsEquivalent,
+          });
+          this.log('🔄 URL mismatch detected; restoring host URL');
+          this.syncRoomUrl(expectedUrl);
+          return;
+        }
+
+        this.lastKnownUrl = expectedUrl;
+      } else {
+        this.lastKnownUrl = newUrl;
+      }
+
+      this.debugNavigation('onUrlChanged:member-handle-deeplink', {newUrl});
       await this.handleDeepLink();
       return;
     }
 
     if (this.currentRoom) {
-      const normalizedUrl = this.ensureShareLink(this.currentRoom);
-      newUrl = normalizedUrl;
+      const ensuredUrl = this.ensureShareLink(this.currentRoom);
+      this.debugNavigation('onUrlChanged:host-ensure-share-link', {
+        ensuredUrl,
+        currentRoom: this.currentRoom,
+      });
+      newUrl = ensuredUrl;
     }
 
+    this.lastKnownUrl = newUrl;
     this.lastBroadcastUrl = null;
+    this.debugNavigation('onUrlChanged:host-broadcast', {
+      broadcastUrl: newUrl,
+    });
     this.broadcastCurrentUrl(newUrl);
   }
 
@@ -1498,7 +1702,15 @@ class WatchPartyContent {
   }
 
   private navigateToUrl(targetUrl: string): void {
+    this.debugNavigation('navigateToUrl:attempt', {
+      targetUrl,
+      currentRoomUrl: this.currentRoomUrl,
+      currentRoom: this.currentRoom,
+      locationHref: window.location.href,
+    });
+
     if (!targetUrl) {
+      this.debugNavigation('navigateToUrl:skip-empty', {});
       return;
     }
 
@@ -1506,13 +1718,15 @@ class WatchPartyContent {
       ? this.applyRoomParamToUrl(targetUrl, this.currentRoom)
       : targetUrl;
 
-    if (effectiveUrl === window.location.href) {
+    if (this.urlsMatchForSync(effectiveUrl, window.location.href)) {
+      this.debugNavigation('navigateToUrl:already-current', {effectiveUrl});
       this.lastKnownUrl = window.location.href;
       this.currentRoomUrl = effectiveUrl;
       return;
     }
 
     this.log('🌐 Syncing page location to:', effectiveUrl);
+    this.debugNavigation('navigateToUrl:perform', {effectiveUrl});
     this.navigationInProgress = true;
     this.lastKnownUrl = effectiveUrl;
     this.currentRoomUrl = effectiveUrl;
@@ -1520,28 +1734,61 @@ class WatchPartyContent {
   }
 
   private syncRoomUrl(targetUrl: string): void {
+    this.debugNavigation('syncRoomUrl:attempt', {
+      targetUrl,
+      currentRoom: this.currentRoom,
+      isHost: this.isHost,
+      locationHref: window.location.href,
+    });
+
     if (!targetUrl) {
+      this.debugNavigation('syncRoomUrl:skip-empty', {});
       return;
     }
 
-    const normalizedUrl = this.currentRoom
+    const resolvedUrl = this.currentRoom
       ? this.applyRoomParamToUrl(targetUrl, this.currentRoom)
       : targetUrl;
 
-    if (normalizedUrl === window.location.href) {
-      this.lastKnownUrl = normalizedUrl;
-      this.currentRoomUrl = normalizedUrl;
+    if (this.urlsMatchForSync(resolvedUrl, window.location.href)) {
+      this.debugNavigation('syncRoomUrl:already-current', {
+        resolvedUrl,
+        locationHref: window.location.href,
+      });
+      this.currentRoomUrl = resolvedUrl;
+      this.lastKnownUrl = window.location.href;
+
+      if (this.currentRoom) {
+        const detectedRoom = this.getRoomIdFromUrl(window.location.href);
+        if (detectedRoom !== this.currentRoom) {
+          this.debugNavigation('syncRoomUrl:missing-room-param', {
+            expectedRoom: this.currentRoom,
+            detectedRoom,
+          });
+          if (this.isHost) {
+            this.ensureShareLink(this.currentRoom);
+          } else {
+            this.navigateToUrl(resolvedUrl);
+          }
+          return;
+        }
+      }
       return;
     }
 
     if (this.isHost && this.currentRoom) {
+      this.debugNavigation('syncRoomUrl:host-update', {
+        resolvedUrl,
+        currentRoom: this.currentRoom,
+      });
       this.ensureShareLink(this.currentRoom);
-      this.currentRoomUrl = normalizedUrl;
+      this.currentRoomUrl = resolvedUrl;
       return;
     }
 
-    this.currentRoomUrl = normalizedUrl;
-    this.navigateToUrl(normalizedUrl);
+    this.debugNavigation('syncRoomUrl:navigate-member', {resolvedUrl});
+    this.currentRoomUrl = resolvedUrl;
+    this.navigateToUrl(resolvedUrl);
   }
 
   private applyRoomParamToUrl(targetUrl: string, roomId: string | null): string {
@@ -1562,18 +1809,145 @@ class WatchPartyContent {
     }
   }
 
+  private normalizeUrlForComparison(targetUrl: string): string {
+    try {
+      const parsed = new URL(targetUrl, window.location.origin);
+      parsed.searchParams.delete(WatchPartyContent.ROOM_HASH_KEY);
+
+      const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+      hashParams.delete(WatchPartyContent.ROOM_HASH_KEY);
+      const newHash = hashParams.toString();
+      parsed.hash = newHash ? `#${newHash}` : '';
+
+      return parsed.toString();
+    } catch (error) {
+      this.log('Failed to normalize url for comparison:', error);
+      return targetUrl;
+    }
+  }
+
+  private urlsMatchForSync(targetUrl: string, candidateUrl: string): boolean {
+    try {
+      const normalizePath = (path: string): string => {
+        if (!path || path === '/') {
+          return '/';
+        }
+        return path.replace(/\/+$/, '') || '/';
+      };
+
+      const decodeSegment = (segment: string): string => {
+        try {
+          return decodeURIComponent(segment);
+        } catch (decodeError) {
+          this.debugNavigation('urlsMatchForSync:decode-failed', {
+            segment,
+            error: decodeError instanceof Error ? decodeError.message : String(decodeError),
+          });
+          return segment;
+        }
+      };
+
+      const toMultiMap = (params: URLSearchParams): Map<string, string[]> => {
+        const map = new Map<string, string[]>();
+        params.forEach((value, key) => {
+          const normalizedKey = decodeSegment(key);
+          if (normalizedKey === WatchPartyContent.ROOM_HASH_KEY) {
+            return;
+          }
+
+          const normalizedValue = decodeSegment(value);
+          const existing = map.get(normalizedKey);
+          if (existing) {
+            existing.push(normalizedValue);
+          } else {
+            map.set(normalizedKey, [normalizedValue]);
+          }
+        });
+        return map;
+      };
+
+      const parseUrl = (value: string) => {
+        const parsed = new URL(value, window.location.origin);
+        return {
+          url: parsed,
+          search: toMultiMap(parsed.searchParams),
+          hash: toMultiMap(new URLSearchParams(parsed.hash.replace(/^#/, ''))),
+        };
+      };
+
+      const expected = parseUrl(targetUrl);
+      const candidate = parseUrl(candidateUrl);
+
+      if (
+        expected.url.origin !== candidate.url.origin ||
+        normalizePath(expected.url.pathname) !== normalizePath(candidate.url.pathname)
+      ) {
+        return false;
+      }
+
+      const isSubset = (required: Map<string, string[]>, actual: Map<string, string[]>): boolean => {
+        for (const [key, values] of required.entries()) {
+          const actualValues = actual.get(key);
+          if (!actualValues) {
+            return false;
+          }
+          for (const value of values) {
+            if (!actualValues.includes(value)) {
+              return false;
+            }
+          }
+        }
+        return true;
+      };
+
+      if (!isSubset(expected.search, candidate.search)) {
+        return false;
+      }
+
+      if (!isSubset(expected.hash, candidate.hash)) {
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      this.log('Failed to compare urls for sync:', error);
+      return targetUrl === candidateUrl;
+    }
+  }
+
+  private urlsEquivalentForSync(urlA: string | null | undefined, urlB: string | null | undefined): boolean {
+    if (!urlA || !urlB) {
+      return urlA === urlB;
+    }
+
+    return this.urlsMatchForSync(urlA, urlB) && this.urlsMatchForSync(urlB, urlA);
+  }
+
   private ensureShareLink(roomId: string | null): string {
+    this.debugNavigation('ensureShareLink:attempt', {
+      roomId,
+      locationHref: window.location.href,
+    });
+
     if (!roomId) {
+      this.debugNavigation('ensureShareLink:no-room', {});
       return window.location.href;
     }
 
     const targetUrl = this.applyRoomParamToUrl(window.location.href, roomId);
 
     if (targetUrl !== window.location.href) {
+      this.debugNavigation('ensureShareLink:update-history', {
+        targetUrl,
+        previousUrl: window.location.href,
+      });
       try {
         window.history.replaceState(window.history.state, '', targetUrl);
       } catch (error) {
         this.log('Failed to update history for share link:', error);
+        this.debugNavigation('ensureShareLink:history-error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       if (this.isHost) {
         this.lastBroadcastUrl = null;
@@ -1582,6 +1956,7 @@ class WatchPartyContent {
 
     this.lastKnownUrl = targetUrl;
     this.currentRoomUrl = targetUrl;
+    this.debugNavigation('ensureShareLink:result', {targetUrl});
     return targetUrl;
   }
 
@@ -1676,23 +2051,72 @@ class WatchPartyContent {
   }
 
   private broadcastCurrentUrl(explicitUrl?: string): void {
-    if (!this.socket?.connected || !this.isHost || !this.currentRoom) {
+    this.debugNavigation('broadcastCurrentUrl:attempt', {
+      explicitUrl,
+      isHost: this.isHost,
+      socketConnected: Boolean(this.socket?.connected),
+      currentRoom: this.currentRoom,
+      lastBroadcastUrl: this.lastBroadcastUrl,
+    });
+
+    if (!this.socket?.connected) {
+      this.debugNavigation('broadcastCurrentUrl:skip-no-socket', {});
+      return;
+    }
+
+    if (!this.isHost) {
+      this.debugNavigation('broadcastCurrentUrl:skip-not-host', {});
+      return;
+    }
+
+    if (!this.currentRoom) {
+      this.debugNavigation('broadcastCurrentUrl:skip-no-room', {});
       return;
     }
 
     const urlToSend = explicitUrl ?? this.ensureShareLink(this.currentRoom);
     if (!urlToSend) {
+      this.debugNavigation('broadcastCurrentUrl:skip-empty-url', {});
       return;
     }
 
-    if (this.lastBroadcastUrl === urlToSend) {
+    if (this.lastBroadcastUrl && this.urlsEquivalentForSync(this.lastBroadcastUrl, urlToSend)) {
+      this.debugNavigation('broadcastCurrentUrl:skip-duplicate', {urlToSend});
       return;
     }
 
     this.lastBroadcastUrl = urlToSend;
     this.currentRoomUrl = urlToSend;
     this.log('🌐 Broadcasting current URL:', urlToSend);
+    this.debugNavigation('broadcastCurrentUrl:emit', {urlToSend});
     this.socket.emit('navigate', {url: urlToSend});
+  }
+
+  private requestMemberNavigation(targetUrl: string): void {
+    this.debugNavigation('memberNavigate:attempt', {
+      targetUrl,
+      socketConnected: Boolean(this.socket?.connected),
+      currentRoom: this.currentRoom,
+      isHost: this.isHost,
+    });
+
+    if (!this.socket?.connected || !this.currentRoom) {
+      this.debugNavigation('memberNavigate:skip-unavailable', {});
+      return;
+    }
+
+    const resolvedUrl = this.applyRoomParamToUrl(targetUrl, this.currentRoom);
+
+    this.ensureShareLink(this.currentRoom);
+
+    this.lastKnownUrl = window.location.href;
+    this.currentRoomUrl = resolvedUrl;
+    this.lastBroadcastUrl = null;
+
+    this.debugNavigation('memberNavigate:emit', {
+      resolvedUrl,
+    });
+    this.socket.emit('member-navigate', {url: resolvedUrl});
   }
 
   private updateShareControls(forceVisible?: boolean): void {

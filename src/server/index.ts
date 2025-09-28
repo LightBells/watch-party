@@ -26,6 +26,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 const USE_FIRESTORE = process.env.NODE_ENV === 'production';
 
+const HOST_REASSIGN_DELAY_MS = 7000;
+
 interface VideoState {
   isPlaying: boolean;
   currentTime: number;
@@ -44,6 +46,8 @@ interface Room {
   members: Map<string, RoomMember>;
   videoState: VideoState;
   currentUrl: string | null;
+  previousHostId: string | null;
+  hostReassignTimer?: NodeJS.Timeout | null;
 }
 
 interface CommentPayload {
@@ -100,6 +104,7 @@ interface ClientToServerEvents {
   pause: (data: PlaybackPayload) => void;
   sync: (data: SyncPayload) => void;
   navigate: (data: NavigatePayload) => void;
+  'member-navigate': (data: NavigatePayload) => void;
 }
 
 interface InterServerEvents {}
@@ -176,6 +181,8 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
         lastUpdateTime: Date.now(),
       },
       currentUrl: pageUrl ?? null,
+      previousHostId: userId,
+      hostReassignTimer: null,
     });
   }
 
@@ -190,6 +197,10 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
     username,
     joinedAt: Date.now(),
   });
+
+  if (!room.previousHostId) {
+    room.previousHostId = room.host;
+  }
 
   const isHost = room.host === userId;
   if (isHost && pageUrl) {
@@ -239,6 +250,25 @@ io.on('connection', (socket) => {
 
   const room = rooms.get(roomId);
   if (room) {
+    const reclaimingHost = room.host !== userId && room.previousHostId === userId;
+
+    if (reclaimingHost) {
+      room.host = userId;
+      room.previousHostId = userId;
+      if (room.hostReassignTimer) {
+        clearTimeout(room.hostReassignTimer);
+        room.hostReassignTimer = null;
+      }
+      io.to(roomId).emit('host-changed', {
+        newHost: userId,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (room.host === userId && room.hostReassignTimer) {
+      clearTimeout(room.hostReassignTimer);
+      room.hostReassignTimer = null;
+    }
     socket.emit('room-state', {
       members: Array.from(room.members.values()),
       videoState: room.videoState,
@@ -351,6 +381,40 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('member-navigate', (data) => {
+    const activeRoom = rooms.get(roomId);
+    if (!activeRoom || !activeRoom.members.has(userId)) {
+      return;
+    }
+
+    if (!data?.url) {
+      return;
+    }
+
+    activeRoom.currentUrl = data.url;
+
+    const previousHost = activeRoom.host;
+    if (activeRoom.hostReassignTimer) {
+      clearTimeout(activeRoom.hostReassignTimer);
+      activeRoom.hostReassignTimer = null;
+    }
+
+    if (previousHost !== userId) {
+      activeRoom.previousHostId = previousHost;
+      activeRoom.host = userId;
+      io.to(roomId).emit('host-changed', {
+        newHost: userId,
+        timestamp: Date.now(),
+      });
+    }
+
+    io.to(roomId).emit('navigate', {
+      url: data.url,
+      userId,
+      timestamp: Date.now(),
+    });
+  });
+
   socket.on('disconnect', () => {
     const sessions = userSessions.get(userId);
     sessions?.delete(socket.id);
@@ -366,18 +430,43 @@ io.on('connection', (socket) => {
       activeRoom.members.delete(userId);
 
       if (activeRoom.members.size === 0) {
+        if (activeRoom.hostReassignTimer) {
+          clearTimeout(activeRoom.hostReassignTimer);
+          activeRoom.hostReassignTimer = null;
+        }
         rooms.delete(roomId);
         return;
       }
 
       if (activeRoom.host === userId) {
-        const [newHost] = activeRoom.members.keys();
-        if (newHost) {
-          activeRoom.host = newHost;
-          socket.to(roomId).emit('host-changed', {
-            newHost,
-            timestamp: Date.now(),
-          });
+        if (activeRoom.hostReassignTimer) {
+          clearTimeout(activeRoom.hostReassignTimer);
+        }
+
+        activeRoom.previousHostId = userId;
+
+        if (activeRoom.members.size > 0) {
+          activeRoom.hostReassignTimer = setTimeout(() => {
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom || currentRoom.host !== userId || currentRoom.members.size === 0) {
+              return;
+            }
+
+            const [newHost] = currentRoom.members.keys();
+            if (!newHost) {
+              return;
+            }
+
+            currentRoom.host = newHost;
+            currentRoom.previousHostId ??= userId;
+            currentRoom.hostReassignTimer = null;
+            io.to(roomId).emit('host-changed', {
+              newHost,
+              timestamp: Date.now(),
+            });
+          }, HOST_REASSIGN_DELAY_MS);
+        } else {
+          activeRoom.hostReassignTimer = null;
         }
       }
 
