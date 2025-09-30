@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Watch Party",
+  "name": "dP Party",
   "version": "1.0.0",
   "description": "リアルタイム動画視聴同期アプリケーション",
   "permissions": [
     "storage",
-    "activeTab",
     "tabs"
   ],
   "host_permissions": [
@@ -20,7 +19,6 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.amazon.co.jp/gp/video/*",
         "https://www.amazon.co.jp/-/*/gp/video/*",
         "https://animestore.docomo.ne.jp/animestore/sc_d_pc*",
         "http://localhost:3000/*",
@@ -39,8 +37,8 @@
     "default_title": "Watch Party"
   },
   "icons": {
-    "16": "icons/icon.svg",
-    "48": "icons/icon.svg",
-    "128": "icons/icon.svg"
+    "16": "icons/16x16.png",
+    "48": "icons/48x48.png",
+    "128": "icons/128x128.png"
   }
 }
