@@ -34,6 +34,8 @@ interface VideoState {
   lastUpdateTime: number;
 }
 
+type PlaybackStatus = 'playing' | 'paused';
+
 interface RoomMember {
   id: string;
   username: string;
@@ -45,6 +47,7 @@ interface Room {
   host: string;
   members: Map<string, RoomMember>;
   videoState: VideoState;
+  playbackStatus: PlaybackStatus;
   currentUrl: string | null;
   previousHostId: string | null;
   hostReassignTimer?: NodeJS.Timeout | null;
@@ -67,6 +70,7 @@ interface ServerToClientEvents {
   'room-state': (data: {
     members: RoomMember[];
     videoState: VideoState;
+    playbackStatus: PlaybackStatus;
     isHost: boolean;
     currentUrl: string | null;
   }) => void;
@@ -180,6 +184,7 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
         currentTime: 0,
         lastUpdateTime: Date.now(),
       },
+      playbackStatus: 'paused',
       currentUrl: pageUrl ?? null,
       previousHostId: userId,
       hostReassignTimer: null,
@@ -208,6 +213,8 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
   }
 
   const token = generateToken(userId, roomId);
+  const playbackStatus: PlaybackStatus = room.videoState.isPlaying ? 'playing' : 'paused';
+  room.playbackStatus = playbackStatus;
 
   res.json({
     token,
@@ -215,6 +222,8 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
     roomId,
     username,
     isHost,
+    playbackStatus,
+    videoState: room.videoState,
     currentUrl: room.currentUrl,
   });
 });
@@ -269,9 +278,12 @@ io.on('connection', (socket) => {
       clearTimeout(room.hostReassignTimer);
       room.hostReassignTimer = null;
     }
+    const playbackStatus: PlaybackStatus = room.videoState.isPlaying ? 'playing' : 'paused';
+    room.playbackStatus = playbackStatus;
     socket.emit('room-state', {
       members: Array.from(room.members.values()),
       videoState: room.videoState,
+      playbackStatus,
       isHost: room.host === userId,
       currentUrl: room.currentUrl,
     });
@@ -311,6 +323,7 @@ io.on('connection', (socket) => {
       currentTime: data?.currentTime ?? activeRoom.videoState.currentTime,
       lastUpdateTime: Date.now(),
     };
+    activeRoom.playbackStatus = 'playing';
 
     socket.to(roomId).emit('play', {
       currentTime: activeRoom.videoState.currentTime,
@@ -330,6 +343,7 @@ io.on('connection', (socket) => {
       currentTime: data?.currentTime ?? activeRoom.videoState.currentTime,
       lastUpdateTime: Date.now(),
     };
+    activeRoom.playbackStatus = 'paused';
 
     socket.to(roomId).emit('pause', {
       currentTime: activeRoom.videoState.currentTime,
@@ -353,6 +367,7 @@ io.on('connection', (socket) => {
       currentTime: data.currentTime,
       lastUpdateTime: Date.now(),
     };
+    activeRoom.playbackStatus = data.isPlaying ? 'playing' : 'paused';
 
     socket.to(roomId).emit('sync', {
       isPlaying: data.isPlaying,

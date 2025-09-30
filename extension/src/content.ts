@@ -6,6 +6,8 @@ type VideoState = {
   lastUpdateTime: number;
 };
 
+type PlaybackStatus = 'playing' | 'paused';
+
 type RoomMember = {
   id: string;
   username?: string;
@@ -15,6 +17,7 @@ type RoomMember = {
 type RoomStatePayload = {
   members: RoomMember[];
   videoState: VideoState;
+  playbackStatus: PlaybackStatus;
   isHost: boolean;
   currentUrl?: string | null;
 };
@@ -53,6 +56,8 @@ class WatchPartyContent {
   private lastSyncTime = 0;
 
   private pendingVideoState: VideoState | null = null;
+
+  private roomPlaybackStatus: PlaybackStatus = 'paused';
 
   private members: RoomMember[] = [];
 
@@ -362,6 +367,9 @@ class WatchPartyContent {
 
     this.setupCommentOverlay();
     this.flushPendingVideoState();
+    if (!this.isHost && this.currentRoom) {
+      this.syncLocalPlaybackStatus(this.roomPlaybackStatus);
+    }
     this.broadcastHostVideoState('video-ready');
     this.setupVideoListeners(videoElement);
   }
@@ -422,6 +430,17 @@ class WatchPartyContent {
     }, 250);
   }
 
+  private syncLocalPlaybackStatus(status: PlaybackStatus): void {
+    if (!this.videoElement) {
+      return;
+    }
+
+    if (status === 'paused' && !this.videoElement.paused) {
+      this.log('⏸️ Pausing local playback to match room status');
+      this.videoElement.pause();
+    }
+  }
+
   private setupInteractionHandlers(): void {
     const attemptFlush = (): void => {
       if (!this.pendingVideoState || this.syncInProgress) {
@@ -447,6 +466,10 @@ class WatchPartyContent {
       }
       return true;
     });
+  }
+
+  private isConnectedToRoom(): boolean {
+    return Boolean(this.currentRoom && this.socket?.connected);
   }
 
   private shouldEmitPlaybackEvents(): boolean {
@@ -487,7 +510,14 @@ class WatchPartyContent {
         currentTime: this.videoElement?.currentTime,
       });
 
+      if (!this.isHost && this.isConnectedToRoom() && this.roomPlaybackStatus === 'paused') {
+        this.log('🚫 Blocking play emit because room is paused');
+        this.syncLocalPlaybackStatus('paused');
+        return;
+      }
+
       if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
+        this.roomPlaybackStatus = 'playing';
         this.socket.emit('play', {
           currentTime: video.currentTime,
           userId: this.currentUser ?? undefined,
@@ -508,6 +538,7 @@ class WatchPartyContent {
       });
 
       if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
+        this.roomPlaybackStatus = 'paused';
         this.socket.emit('pause', {
           currentTime: video.currentTime,
           userId: this.currentUser ?? undefined,
@@ -780,10 +811,14 @@ class WatchPartyContent {
         token: string;
         userId: string;
         isHost: boolean;
+        playbackStatus?: PlaybackStatus;
+        videoState?: VideoState;
         currentUrl?: string | null;
       };
 
       this.authToken = data.token;
+      const playbackStatus = data.playbackStatus ?? 'paused';
+      this.roomPlaybackStatus = playbackStatus;
 
       await this.saveRoomData(data.roomId, data.token, data.userId, username, data.isHost);
 
@@ -797,6 +832,14 @@ class WatchPartyContent {
 
       if (!this.isHost) {
         this.enforcePauseWhileAwaiting();
+        if (playbackStatus === 'paused') {
+          this.syncLocalPlaybackStatus('paused');
+        }
+
+        if (data.videoState) {
+          this.pendingVideoState = {...data.videoState};
+          this.flushPendingVideoState();
+        }
       }
 
       if (this.isHost) {
@@ -988,10 +1031,14 @@ class WatchPartyContent {
       });
       this.log('🏠 Room state received:', data);
       this.isHost = data.isHost;
+      this.roomPlaybackStatus = data.playbackStatus;
       this.updateHostHeartbeat();
       this.log('👑 Host status updated:', this.isHost ? 'HOST' : 'MEMBER');
       this.updateStatus(this.isHost ? 'ホスト' : 'メンバー');
       this.updateMembers(data.members);
+      if (!this.isHost) {
+        this.syncLocalPlaybackStatus(data.playbackStatus);
+      }
       if (data.currentUrl) {
         this.syncRoomUrl(data.currentUrl);
       }
@@ -1017,6 +1064,7 @@ class WatchPartyContent {
 
     this.socket.on('play', (data: {currentTime: number; userId: string; timestamp: number}) => {
       this.log('📥 Received play event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
+      this.roomPlaybackStatus = 'playing';
       if (data.userId !== this.currentUser) {
         this.syncVideo(true, data.currentTime, data.timestamp);
       }
@@ -1024,6 +1072,7 @@ class WatchPartyContent {
 
     this.socket.on('pause', (data: {currentTime: number; userId: string; timestamp: number}) => {
       this.log('📥 Received pause event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
+      this.roomPlaybackStatus = 'paused';
       if (data.userId !== this.currentUser) {
         this.syncVideo(false, data.currentTime, data.timestamp);
       }
@@ -1031,6 +1080,7 @@ class WatchPartyContent {
 
     this.socket.on('sync', (data: {isPlaying: boolean; currentTime: number; userId: string; timestamp: number}) => {
       this.log('📥 Received sync event:', data, 'fromUserId:', data.userId, 'myUserId:', this.currentUser);
+      this.roomPlaybackStatus = data.isPlaying ? 'playing' : 'paused';
       if (data.userId !== this.currentUser) {
         this.syncVideo(data.isPlaying, data.currentTime, data.timestamp);
       }
