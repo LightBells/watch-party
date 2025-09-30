@@ -27,6 +27,10 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const USE_FIRESTORE = process.env.NODE_ENV === 'production';
 
 const HOST_REASSIGN_DELAY_MS = 7000;
+const HEARTBEAT_INTERVAL_MS = 5000;
+const HEARTBEAT_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * 2;
+
+type ConnectionStatus = 'online' | 'offline';
 
 interface VideoState {
   isPlaying: boolean;
@@ -40,6 +44,8 @@ interface RoomMember {
   id: string;
   username: string;
   joinedAt: number;
+  status: ConnectionStatus;
+  lastHeartbeatAt: number;
 }
 
 interface Room {
@@ -100,6 +106,11 @@ interface ServerToClientEvents {
   'user-left': (data: { userId: string; members: RoomMember[]; timestamp: number }) => void;
   'host-changed': (data: { newHost: string; timestamp: number }) => void;
   navigate: (data: { url: string; userId: string; timestamp: number }) => void;
+  'member-status': (data: {
+    members: RoomMember[];
+    changedUserId: string | null;
+    timestamp: number;
+  }) => void;
 }
 
 interface ClientToServerEvents {
@@ -109,6 +120,7 @@ interface ClientToServerEvents {
   sync: (data: SyncPayload) => void;
   navigate: (data: NavigatePayload) => void;
   'member-navigate': (data: NavigatePayload) => void;
+  heartbeat: () => void;
 }
 
 interface InterServerEvents {}
@@ -156,6 +168,34 @@ const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterS
   },
 );
 
+const getRoomMembersSnapshot = (room: Room): RoomMember[] =>
+  Array.from(room.members.values()).map((member) => ({ ...member }));
+
+const emitMemberStatus = (room: Room, changedUserId: string | null = null): void => {
+  io.to(room.id).emit('member-status', {
+    members: getRoomMembersSnapshot(room),
+    changedUserId,
+    timestamp: Date.now(),
+  });
+};
+
+setInterval(() => {
+  const now = Date.now();
+  rooms.forEach((room) => {
+    let hasChanges = false;
+    room.members.forEach((member) => {
+      if (member.status === 'online' && now - member.lastHeartbeatAt > HEARTBEAT_TIMEOUT_MS) {
+        member.status = 'offline';
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      emitMemberStatus(room);
+    }
+  });
+}, HEARTBEAT_INTERVAL_MS);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../public')));
@@ -201,6 +241,8 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
     id: userId,
     username,
     joinedAt: Date.now(),
+    status: 'online',
+    lastHeartbeatAt: Date.now(),
   });
 
   if (!room.previousHostId) {
@@ -259,6 +301,22 @@ io.on('connection', (socket) => {
 
   const room = rooms.get(roomId);
   if (room) {
+    let member = room.members.get(userId);
+
+    if (!member) {
+      member = {
+        id: userId,
+        username: `Member-${userId.slice(0, 6)}`,
+        joinedAt: Date.now(),
+        status: 'online',
+        lastHeartbeatAt: Date.now(),
+      };
+      room.members.set(userId, member);
+    } else {
+      member.status = 'online';
+      member.lastHeartbeatAt = Date.now();
+    }
+
     const reclaimingHost = room.host !== userId && room.previousHostId === userId;
 
     if (reclaimingHost) {
@@ -281,7 +339,7 @@ io.on('connection', (socket) => {
     const playbackStatus: PlaybackStatus = room.videoState.isPlaying ? 'playing' : 'paused';
     room.playbackStatus = playbackStatus;
     socket.emit('room-state', {
-      members: Array.from(room.members.values()),
+      members: getRoomMembersSnapshot(room),
       videoState: room.videoState,
       playbackStatus,
       isHost: room.host === userId,
@@ -290,9 +348,11 @@ io.on('connection', (socket) => {
 
     socket.to(roomId).emit('user-joined', {
       userId,
-      members: Array.from(room.members.values()),
+      members: getRoomMembersSnapshot(room),
       timestamp: Date.now(),
     });
+
+    emitMemberStatus(room, userId);
   }
 
   socket.on('comment', (data) => {
@@ -396,6 +456,24 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('heartbeat', () => {
+    const activeRoom = rooms.get(roomId);
+    if (!activeRoom) {
+      return;
+    }
+
+    const member = activeRoom.members.get(userId);
+    if (!member) {
+      return;
+    }
+
+    member.lastHeartbeatAt = Date.now();
+    if (member.status !== 'online') {
+      member.status = 'online';
+      emitMemberStatus(activeRoom, userId);
+    }
+  });
+
   socket.on('member-navigate', (data) => {
     const activeRoom = rooms.get(roomId);
     if (!activeRoom || !activeRoom.members.has(userId)) {
@@ -487,9 +565,11 @@ io.on('connection', (socket) => {
 
       socket.to(roomId).emit('user-left', {
         userId,
-        members: Array.from(activeRoom.members.values()),
+        members: getRoomMembersSnapshot(activeRoom),
         timestamp: Date.now(),
       });
+
+      emitMemberStatus(activeRoom);
     }
   });
 });

@@ -12,6 +12,8 @@ type RoomMember = {
   id: string;
   username?: string;
   joinedAt?: number;
+  status?: 'online' | 'offline';
+  lastHeartbeatAt?: number;
 };
 
 type RoomStatePayload = {
@@ -37,6 +39,7 @@ type NavigateEventPayload = {
 
 class WatchPartyContent {
   private static readonly ROOM_HASH_KEY = 'watchparty-room';
+  private static readonly MEMBER_HEARTBEAT_INTERVAL = 4000;
 
   private static historyPatched = false;
   private socket: Socket | null = null;
@@ -87,6 +90,8 @@ class WatchPartyContent {
 
   private videoEventListenerCleanups: Array<() => void> = [];
 
+  private toastContainer: HTMLDivElement | null = null;
+
   private readonly handleViewportChange = () => {
     window.requestAnimationFrame(() => this.updateCommentOverlayBounds());
   };
@@ -128,6 +133,8 @@ class WatchPartyContent {
   private currentRoomUrl: string | null = null;
 
   private hostUrlHeartbeatId: number | null = null;
+
+  private memberHeartbeatIntervalId: number | null = null;
 
   private readonly serverUrl: string;
 
@@ -329,6 +336,35 @@ class WatchPartyContent {
     this.debugNavigation('hostHeartbeat:stop');
     window.clearInterval(this.hostUrlHeartbeatId);
     this.hostUrlHeartbeatId = null;
+  }
+
+  private startMemberHeartbeat(): void {
+    if (this.memberHeartbeatIntervalId !== null) {
+      return;
+    }
+
+    const sendHeartbeat = (): void => {
+      if (!this.socket?.connected) {
+        return;
+      }
+
+      this.socket.emit('heartbeat');
+    };
+
+    sendHeartbeat();
+    this.memberHeartbeatIntervalId = window.setInterval(
+      sendHeartbeat,
+      WatchPartyContent.MEMBER_HEARTBEAT_INTERVAL,
+    );
+  }
+
+  private stopMemberHeartbeat(): void {
+    if (this.memberHeartbeatIntervalId === null) {
+      return;
+    }
+
+    window.clearInterval(this.memberHeartbeatIntervalId);
+    this.memberHeartbeatIntervalId = null;
   }
 
   private async detectVideoElement(): Promise<void> {
@@ -874,6 +910,8 @@ class WatchPartyContent {
       this.socket = null;
     }
 
+    this.stopMemberHeartbeat();
+
     await this.removeRoomData();
 
     this.currentRoom = null;
@@ -963,7 +1001,12 @@ class WatchPartyContent {
   }
 
   private updateMembers(members: RoomMember[]): void {
-    this.members = [...members];
+    const normalizedMembers = members.map((member) => ({
+      ...member,
+      status: member.status ?? 'offline',
+    }));
+
+    this.members = normalizedMembers;
 
     const membersList = document.getElementById('wp-members-list');
     if (!membersList) {
@@ -972,19 +1015,35 @@ class WatchPartyContent {
 
     membersList.innerHTML = '';
 
-    this.members.forEach((member) => {
+    normalizedMembers.forEach((member) => {
+      const status = member.status ?? 'offline';
+
       const item = document.createElement('div');
-      item.className = 'wp-member-item';
-      item.textContent = member.username || member.id;
+      item.classList.add('wp-member-item', 'wp-member');
       if (member.id === this.currentUser) {
-        item.classList.add('self');
+        item.classList.add('self', 'wp-member-self');
       }
+      if (status !== 'online') {
+        item.classList.add('wp-member-offline');
+      }
+
+      const nameElement = document.createElement('span');
+      nameElement.className = 'wp-member-name';
+      nameElement.textContent = member.username || member.id;
+
+      const statusElement = document.createElement('span');
+      statusElement.className = `wp-member-status ${status}`;
+      statusElement.textContent = status === 'online' ? 'オンライン' : 'オフライン';
+
+      item.appendChild(nameElement);
+      item.appendChild(statusElement);
       membersList.appendChild(item);
     });
   }
 
   private async connectToRoom(token: string): Promise<void> {
     if (this.socket) {
+      this.stopMemberHeartbeat();
       this.socket.disconnect();
     }
 
@@ -1005,6 +1064,7 @@ class WatchPartyContent {
       this.log('👤 User ID:', this.currentUser);
       this.updateStatus('接続中');
       this.showRoomInfo();
+      this.startMemberHeartbeat();
       if (this.isHost) {
         this.broadcastCurrentUrl();
         this.broadcastHostVideoState('socket-connect');
@@ -1018,6 +1078,7 @@ class WatchPartyContent {
         roomId: this.currentRoom,
         userId: this.currentUser,
       });
+      this.stopMemberHeartbeat();
       this.stopHostUrlHeartbeat();
       this.log('Disconnected from room');
       this.updateStatus('切断');
@@ -1098,6 +1159,11 @@ class WatchPartyContent {
     });
 
     this.socket.on('user-joined', (data: {userId: string; members: RoomMember[]; timestamp: number}) => {
+      const joinedMember = data.members.find((member) => member.id === data.userId);
+      const previousStatusMap = new Map(
+        this.members.map((member) => [member.id, member.status ?? 'offline']),
+      );
+
       this.updateMembers(data.members);
 
       void chrome.runtime.sendMessage({
@@ -1118,6 +1184,17 @@ class WatchPartyContent {
         },
       });
 
+      if (joinedMember && data.userId !== this.currentUser) {
+        const displayName = joinedMember.username || joinedMember.id;
+        const previousStatus = previousStatusMap.get(data.userId);
+        const isReturning = previousStatus === 'offline';
+        if (isReturning) {
+          this.showToast(`${displayName} がオンラインに復帰しました`, 'join');
+        } else {
+          this.showToast(`${displayName} が参加しました`, 'join');
+        }
+      }
+
       if (this.isHost) {
         this.log('📡 Syncing state in response to new member join');
         this.broadcastHostVideoState('user-joined');
@@ -1125,6 +1202,8 @@ class WatchPartyContent {
     });
 
     this.socket.on('user-left', (data: {userId: string; members: RoomMember[]; timestamp: number}) => {
+      const previousMembers = [...this.members];
+
       this.updateMembers(data.members);
 
       void chrome.runtime.sendMessage({
@@ -1144,6 +1223,14 @@ class WatchPartyContent {
           timestamp: data.timestamp,
         },
       });
+
+      const leavingMember = previousMembers.find((member) => member.id === data.userId);
+      if (leavingMember) {
+        const displayName = leavingMember.username || leavingMember.id;
+        this.showToast(`${displayName} が退出しました`, 'leave');
+      } else {
+        this.showToast('メンバーが退出しました', 'leave');
+      }
     });
 
     this.socket.on('host-changed', (data: {newHost: string; timestamp: number}) => {
@@ -1187,6 +1274,23 @@ class WatchPartyContent {
       }
       this.currentRoomUrl = data.url;
       this.syncRoomUrl(data.url);
+    });
+
+    this.socket.on('member-status', (data: {members: RoomMember[]; changedUserId: string | null; timestamp?: number}) => {
+      const previousMembers = this.members.map((member) => ({...member}));
+
+      this.updateMembers(data.members);
+
+      this.notifyStatusTransitions(previousMembers, this.members, data.changedUserId);
+
+      void chrome.runtime.sendMessage({
+        action: 'roomStateUpdate',
+        data: {
+          members: this.members,
+          isHost: this.isHost,
+          currentUrl: this.currentRoomUrl ?? null,
+        },
+      });
     });
   }
 
@@ -1424,6 +1528,94 @@ class WatchPartyContent {
 
     document.body.appendChild(this.commentOverlay);
     return this.commentOverlay;
+  }
+
+  private ensureToastContainer(): HTMLDivElement | null {
+    if (this.toastContainer && document.body.contains(this.toastContainer)) {
+      return this.toastContainer;
+    }
+
+    if (!document.body) {
+      return null;
+    }
+
+    this.toastContainer = document.createElement('div');
+    this.toastContainer.id = 'wp-toast-container';
+    this.toastContainer.className = 'wp-toast-container';
+    document.body.appendChild(this.toastContainer);
+    return this.toastContainer;
+  }
+
+  private showToast(message: string, type: 'join' | 'leave' | 'info' = 'info'): void {
+    const container = this.ensureToastContainer();
+    if (!container) {
+      return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `wp-toast wp-toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    window.requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+
+    const scheduleHide = (): number =>
+      window.setTimeout(() => {
+        toast.classList.remove('show');
+        const removeTimeout = window.setTimeout(() => {
+          toast.remove();
+          window.clearTimeout(removeTimeout);
+        }, 300);
+      }, 3000);
+
+    let hideTimeout = scheduleHide();
+
+    toast.addEventListener('mouseenter', () => {
+      if (hideTimeout) {
+        window.clearTimeout(hideTimeout);
+        hideTimeout = 0;
+      }
+    });
+
+    toast.addEventListener('mouseleave', () => {
+      if (!hideTimeout) {
+        hideTimeout = scheduleHide();
+      }
+    });
+  }
+
+  private notifyStatusTransitions(
+    previous: RoomMember[],
+    current: RoomMember[],
+    _changedUserId: string | null,
+  ): void {
+    if (current.length === 0) {
+      return;
+    }
+
+    const previousMap = new Map(previous.map((member) => [member.id, member.status ?? 'offline']));
+
+    current.forEach((member) => {
+      const prevStatus = previousMap.get(member.id);
+      const nextStatus = member.status ?? 'offline';
+
+      if (!prevStatus || prevStatus === nextStatus) {
+        return;
+      }
+
+      if (member.id === this.currentUser) {
+        return;
+      }
+
+      const displayName = member.username || member.id;
+      if (nextStatus === 'online') {
+        this.showToast(`${displayName} がオンラインになりました`, 'join');
+      } else if (nextStatus === 'offline') {
+        this.showToast(`${displayName} がオフラインになりました`, 'leave');
+      }
+    });
   }
 
   private updateCommentOverlayBounds(): void {

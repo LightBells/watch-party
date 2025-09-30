@@ -247,6 +247,10 @@
 }
 
 .wp-member {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     padding: 6px 10px;
     background: rgba(248, 249, 250, 0.6);
     border-radius: 6px;
@@ -254,6 +258,47 @@
     font-size: 12px;
     color: #333;
     backdrop-filter: blur(5px);
+    transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.wp-member-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wp-member-status {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: none;
+}
+
+.wp-member-status.online {
+    color: #28a745;
+}
+
+.wp-member-status.offline {
+    color: #dc3545;
+}
+
+.wp-member-offline {
+    opacity: 0.6;
+}
+
+.wp-member-self {
+    background: rgba(227, 242, 253, 0.6);
+    color: #1565c0;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(5px);
+}
+
+.wp-member-self .wp-member-status {
+    color: #1565c0;
 }
 
 .wp-share-controls {
@@ -286,12 +331,49 @@
     opacity: 1;
 }
 
-.wp-member-self {
-    background: rgba(227, 242, 253, 0.6);
-    color: #1565c0;
+.wp-toast-container {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 10001;
+    pointer-events: none;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.wp-toast {
+    min-width: 220px;
+    max-width: min(320px, 80vw);
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-size: 13px;
     font-weight: 500;
-    letter-spacing: 0.02em;
-    backdrop-filter: blur(5px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+    transform: translateY(-10px);
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: auto;
+}
+
+.wp-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.wp-toast-join {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.95), rgba(11, 143, 47, 0.95));
+}
+
+.wp-toast-leave {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.95), rgba(190, 35, 49, 0.95));
+}
+
+.wp-toast-info {
+    background: linear-gradient(135deg, rgba(33, 150, 243, 0.95), rgba(30, 120, 210, 0.95));
 }
 
 .wp-member-host {
