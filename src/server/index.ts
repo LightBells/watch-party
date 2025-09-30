@@ -61,6 +61,7 @@ interface Room {
 
 interface CommentPayload {
   message: string;
+  commands?: string | null;
 }
 
 interface PlaybackPayload {
@@ -366,6 +367,7 @@ io.on('connection', (socket) => {
       userId,
       username: member?.username,
       message: data.message,
+      commands: data.commands ?? null,
       timestamp: Date.now(),
     };
 

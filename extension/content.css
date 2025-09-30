@@ -6,7 +6,7 @@
     top: 20px;
     right: 20px;
     z-index: 10000;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.2);
     color: white;
     padding: 12px 16px;
     border-radius: 12px;
@@ -385,15 +385,16 @@
    ================================= */
 #wp-comment-input {
     position: fixed;
-    bottom: 20px;
+    bottom: 60px;
     right: 0;
     z-index: 10000;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     display: flex;
     align-items: center;
     gap: 0;
-    --wp-comment-panel-min-width: 360px;
-    --wp-comment-panel-max-width: min(520px, 60vw);
+    --wp-comment-panel-min-width: 480px;
+    --wp-comment-panel-max-width: min(700px, 75vw);
+    --wp-comment-panel-height: 60px;
 }
 
 .wp-comment-toggle {
@@ -401,11 +402,13 @@
     justify-content: center;
     align-items: center;
     margin-right: -1px;
-    height: 50px;
+    height: var(--wp-comment-panel-height);
+    min-height: var(--wp-comment-panel-height);
+    max-height: var(--wp-comment-panel-height);
 }
 
 .wp-toggle-btn {
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.2);
     color: white;
     border: none;
     padding: 0;
@@ -420,8 +423,8 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    width: 50px;
-    height: 50px;
+    width: 30px;
+    height: 30px;
     position: relative;
     border-right: 3px solid transparent;
     box-sizing: border-box;
@@ -434,6 +437,8 @@
 }
 
 .wp-toggle-btn.open {
+    width: 60px;
+    height: 60px;
     border-radius: 20px 0 0 20px;
     background: rgba(0, 123, 255, 0.6);
 }
@@ -456,7 +461,7 @@
     backdrop-filter: blur(10px);
     border: 1px solid rgba(233, 236, 239, 0.6);
     border-radius: 0 16px 16px 0;
-    padding: 0 16px;
+    padding: 15px 18px;
     animation: panelSlideLeft 0.3s ease-out;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
     width: fit-content;
@@ -464,8 +469,10 @@
     max-width: var(--wp-comment-panel-max-width);
     display: flex;
     align-items: center;
+    justify-content: center;
+    gap: 12px;
     box-sizing: border-box;
-    height: 50px;
+    height: var(--wp-comment-panel-height);
 }
 
 .wp-comment-panel.hidden {
@@ -488,16 +495,34 @@
     align-items: center;
     gap: 12px;
     width: 100%;
+    flex-wrap: nowrap;
+    flex: 1 1 auto;
 }
 
-.wp-comment-form .wp-btn {
-    flex: 0 0 auto;
+#wp-command-text {
+    flex: 0 0 180px;
+    min-width: 150px;
+    max-width: 220px;
+    padding: 0 12px;
+    border: 2px solid rgba(233, 236, 239, 0.6);
+    border-radius: 20px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(5px);
+    height: 36px;
+    box-sizing: border-box;
+}
+
+#wp-command-text:focus {
+    border-color: rgba(0, 123, 255, 0.6);
+    background: rgba(255, 255, 255, 0.8);
 }
 
 #wp-comment-text {
     flex: 1 1 auto;
-    min-width: 160px;
-    max-width: 100%;
+    min-width: 0;
     padding: 0 12px;
     border: 2px solid rgba(233, 236, 239, 0.6);
     border-radius: 20px;
@@ -529,6 +554,7 @@
     white-space: nowrap;
     backdrop-filter: blur(5px);
     height: 36px;
+    flex: 0 0 auto;
 }
 
 #wp-send-comment:hover {
@@ -564,6 +590,7 @@
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     will-change: transform;
     opacity: 0;
+    --comment-active-opacity: 1;
 }
 
 .watch-party-comment--self {
@@ -573,9 +600,33 @@
     padding: 0 8px;
 }
 
+.watch-party-comment--static {
+    left: 50%;
+    transform: translate3d(-50%, 0, 0);
+    animation: none;
+    opacity: var(--comment-active-opacity, 1);
+    white-space: pre-wrap;
+    text-align: center;
+}
+
+.watch-party-comment--top {
+    top: min(10%, 60px);
+    bottom: auto;
+}
+
+.watch-party-comment--bottom {
+    bottom: min(10%, 60px);
+    top: auto;
+}
+
+.watch-party-comment--full {
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+
 .watch-party-comment.animate {
     animation: watchPartyCommentScroll var(--comment-duration, 30s) linear forwards;
-    opacity: 1;
+    opacity: var(--comment-active-opacity, 1);
 }
 
 .watch-party-comment .user {
@@ -583,17 +634,27 @@
     font-weight: 600;
 }
 
+.watch-party-comment .separator {
+    display: inline-block;
+    margin: 0 6px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.watch-party-comment .message {
+    color: inherit;
+}
+
 @keyframes watchPartyCommentScroll {
     0% {
         transform: translate3d(0, 0, 0);
-        opacity: 1;
+        opacity: var(--comment-active-opacity, 1);
     }
     2% {
-        opacity: 1;
+        opacity: var(--comment-active-opacity, 1);
     }
     100% {
         transform: translate3d(calc(-1 * var(--comment-travel, 1200px)), 0, 0);
-        opacity: 1;
+        opacity: var(--comment-active-opacity, 1);
     }
 }
 
@@ -612,7 +673,7 @@
     }
     
     #wp-comment-input {
-        bottom: 10px;
+        bottom: 60px;
         right: 0;
     }
     
@@ -624,7 +685,7 @@
     .wp-toggle-btn {
         width: 45px;
         height: 45px;
-        padding: 12px 15px;
+        padding: 30px 15px;
     }
     
     .wp-toggle-icon {

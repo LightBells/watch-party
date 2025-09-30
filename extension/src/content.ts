@@ -29,6 +29,51 @@ type CommentPayload = {
   username?: string;
   message: string;
   timestamp: number;
+  commands?: string | null;
+};
+
+type CommentCommandOptions = {
+  color?: string;
+  fontSize?: string;
+  position: 'ue' | 'shita' | 'naka';
+  opacity?: number;
+  fontFamily?: string;
+  fullWidth: boolean;
+  invisible: boolean;
+};
+
+const COMMENT_COLOR_MAP: Record<string, string> = {
+  white: '#ffffff',
+  red: '#ff0000',
+  pink: '#ff8080',
+  yellow: '#ffff00',
+  orange: '#ffcc00',
+  green: '#00ff00',
+  cyan: '#00ffff',
+  blue: '#0000ff',
+  purple: '#c000ff',
+  black: '#000000',
+  white2: '#cccc99',
+  red2: '#cc0000',
+  pink2: '#ff33cc',
+  yellow2: '#999900',
+  orange2: '#ff6600',
+  green2: '#00cc00',
+  cyan2: '#0099ff',
+  blue2: '#000099',
+  purple2: '#9900ff',
+  black2: '#666666',
+};
+
+const COMMENT_SIZE_MAP: Record<string, string> = {
+  big: '3em',
+  small: '1.6em',
+  medium: '2em',
+};
+
+const COMMENT_FONT_FAMILIES: Record<string, string> = {
+  mincho: '"Yu Mincho", "Hiragino Mincho ProN", "HiraMinProN-W3", "MS PMincho", serif',
+  gothic: '"Yu Gothic", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
 };
 
 type NavigateEventPayload = {
@@ -100,12 +145,14 @@ class WatchPartyContent {
 
   private readonly interceptCommentInputKeyEvent = (event: KeyboardEvent): void => {
     const commentInput = this.getInput('wp-comment-text');
-    if (!commentInput) {
+    const commandInput = this.getInput('wp-command-text');
+
+    if (!commentInput && !commandInput) {
       return;
     }
 
     const activeElement = document.activeElement;
-    if (activeElement !== commentInput) {
+    if (activeElement !== commentInput && activeElement !== commandInput) {
       return;
     }
 
@@ -121,7 +168,11 @@ class WatchPartyContent {
       !event.repeat
     ) {
       event.preventDefault();
-      this.sendComment();
+      if (activeElement === commandInput) {
+        commentInput?.focus();
+      } else {
+        this.sendComment();
+      }
     }
 
     event.stopImmediatePropagation();
@@ -758,11 +809,12 @@ class WatchPartyContent {
     commentInput.innerHTML = `
       <div class="wp-comment-toggle">
         <button id="wp-toggle-comment" class="wp-toggle-btn">
-          <span class="wp-toggle-icon">›</span>
+          <span class="wp-toggle-icon">‹</span>
         </button>
       </div>
       <div class="wp-comment-panel hidden" id="wp-comment-panel">
         <div class="wp-comment-form">
+          <input type="text" id="wp-command-text" placeholder="コマンド (例: red big)" autocomplete="off">
           <input type="text" id="wp-comment-text" placeholder="コメントを入力...">
           <button id="wp-send-comment" class="wp-btn wp-btn-primary">送信</button>
         </div>
@@ -817,7 +869,8 @@ class WatchPartyContent {
     }
 
     const commentInput = this.getInput('wp-comment-text');
-    if (!commentInput) {
+    const commandInput = this.getInput('wp-command-text');
+    if (!commentInput && !commandInput) {
       return;
     }
 
@@ -1019,13 +1072,20 @@ class WatchPartyContent {
   private sendComment(): void {
     const commentInput = this.getInput('wp-comment-text');
     const message = commentInput?.value.trim();
+    const commandInput = this.getInput('wp-command-text');
+    const commandValue = commandInput?.value.trim() ?? '';
+
+    const normalizedCommands = commandValue.replace(/\s+/g, ' ').trim();
 
     if (!message) {
       return;
     }
 
     if (this.socket?.connected) {
-      this.socket.emit('comment', {message});
+      this.socket.emit('comment', {
+        message,
+        commands: normalizedCommands || undefined,
+      });
       if (commentInput) {
         commentInput.value = '';
       }
@@ -1232,7 +1292,7 @@ class WatchPartyContent {
     this.socket.on('comment', (data: CommentPayload) => {
       this.log('Received comment:', data);
       const isOwnComment = data.userId === this.currentUser;
-      this.showComment(data.message, data.username || data.userId, isOwnComment);
+      this.showComment(data.message, data.username || data.userId, isOwnComment, data.commands ?? undefined);
 
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
@@ -1522,7 +1582,12 @@ class WatchPartyContent {
     }, 300);
   }
 
-  private showComment(message: string, displayName: string, isOwnComment = false): void {
+  private showComment(
+    message: string,
+    displayName: string,
+    isOwnComment = false,
+    commandString?: string | null,
+  ): void {
     const overlay = this.ensureCommentOverlay();
     if (!overlay) {
       return;
@@ -1530,16 +1595,68 @@ class WatchPartyContent {
 
     this.updateCommentOverlayBounds();
 
+    const commandOptions = this.parseCommentCommands(commandString);
+    if (commandOptions.invisible) {
+      return;
+    }
+
     const commentElement = document.createElement('div');
     commentElement.classList.add('watch-party-comment');
     if (isOwnComment) {
       commentElement.classList.add('watch-party-comment--self');
     }
+
     commentElement.innerHTML = `
-      <span class=\"user\">${displayName}</span>: ${message}
+      <span class=\"user\">${displayName}</span><span class=\"separator\">:</span> <span class=\"message\">${message}</span>
     `;
 
+    if (commandOptions.color) {
+      const messageSpan = commentElement.querySelector('.message');
+      if (messageSpan instanceof HTMLElement) {
+        messageSpan.style.color = commandOptions.color;
+      } else {
+        commentElement.style.color = commandOptions.color;
+      }
+    }
+
+    if (commandOptions.fontFamily) {
+      commentElement.style.fontFamily = commandOptions.fontFamily;
+    }
+
+    if (commandOptions.fontSize) {
+      commentElement.style.fontSize = commandOptions.fontSize;
+    }
+
+    if (commandOptions.fullWidth) {
+      commentElement.classList.add('watch-party-comment--full');
+    }
+
+    if (commandOptions.opacity !== undefined) {
+      commentElement.style.setProperty('--comment-active-opacity', `${commandOptions.opacity}`);
+    }
+
+    const isStaticPosition = commandOptions.position === 'ue' || commandOptions.position === 'shita';
+
     overlay.appendChild(commentElement);
+
+    if (isStaticPosition) {
+      commentElement.classList.add('watch-party-comment--static');
+      if (commandOptions.position === 'ue') {
+        commentElement.classList.add('watch-party-comment--top');
+      } else {
+        commentElement.classList.add('watch-party-comment--bottom');
+      }
+
+      if (commandOptions.opacity !== undefined) {
+        commentElement.style.opacity = `${commandOptions.opacity}`;
+      }
+
+      const lifetime = Math.max(4000, Math.min(9000, 6000 + message.length * 120));
+      window.setTimeout(() => {
+        commentElement.remove();
+      }, lifetime);
+      return;
+    }
 
     const overlayHeight =
       overlay.clientHeight || this.videoElement?.clientHeight || window.innerHeight;
@@ -1552,7 +1669,10 @@ class WatchPartyContent {
       commentElement.getBoundingClientRect().width || commentElement.scrollWidth || commentElement.offsetWidth || 0;
     const overlayWidth =
       overlay.clientWidth || this.videoElement?.clientWidth || Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
-    const travelDistance = Math.max(overlayWidth, window.innerWidth) + commentWidth;
+    let travelDistance = Math.max(overlayWidth, window.innerWidth) + commentWidth;
+    if (commandOptions.fullWidth) {
+      travelDistance = Math.max(overlayWidth, window.innerWidth) * 2;
+    }
     commentElement.style.setProperty('--comment-travel', `${travelDistance}px`);
 
     const textLength = (message?.length ?? 0) + (displayName?.length ?? 0);
@@ -1570,6 +1690,117 @@ class WatchPartyContent {
       },
       {once: true},
     );
+  }
+
+  private parseCommentCommands(commandString?: string | null): CommentCommandOptions {
+    const defaults: CommentCommandOptions = {
+      position: 'naka',
+      fullWidth: false,
+      invisible: false,
+    };
+
+    if (!commandString) {
+      return defaults;
+    }
+
+    const tokens = commandString
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+
+    if (!tokens.length) {
+      return defaults;
+    }
+
+    let color: string | undefined;
+    let fontSize: string | undefined;
+    let fontFamily: string | undefined;
+    let position: 'ue' | 'shita' | 'naka' | undefined;
+    let fullWidth = false;
+    let invisible = false;
+    let opacity: number | undefined;
+    let customColor: string | undefined;
+    let liveCount = 0;
+
+    tokens.forEach((originalToken) => {
+      const normalized = originalToken.toLowerCase();
+
+      if (COMMENT_COLOR_MAP[normalized]) {
+        color = COMMENT_COLOR_MAP[normalized];
+        return;
+      }
+
+      if (/^#[0-9a-f]{3,8}$/i.test(originalToken)) {
+        customColor = this.normalizeHexColor(originalToken);
+        return;
+      }
+
+      if (COMMENT_SIZE_MAP[normalized]) {
+        fontSize = COMMENT_SIZE_MAP[normalized];
+        return;
+      }
+
+      if (normalized === 'ue' || normalized === 'shita' || normalized === 'naka') {
+        position = normalized as 'ue' | 'shita' | 'naka';
+        return;
+      }
+
+      if (normalized === 'invisible') {
+        invisible = true;
+        return;
+      }
+
+      if (normalized === 'full') {
+        fullWidth = true;
+        return;
+      }
+
+      if (normalized === '_live') {
+        liveCount += 1;
+        return;
+      }
+
+      if (COMMENT_FONT_FAMILIES[normalized]) {
+        fontFamily = COMMENT_FONT_FAMILIES[normalized];
+        return;
+      }
+
+      // Commands such as patissier / ca / ender are recognized but have no visual impact here.
+    });
+
+    if (customColor) {
+      color = customColor;
+    }
+
+    if (liveCount > 0) {
+      opacity = Math.min(1, 0.45 + liveCount * 0.15);
+    }
+
+    return {
+      color,
+      fontSize,
+      position: position ?? 'naka',
+      opacity,
+      fontFamily,
+      fullWidth,
+      invisible,
+    };
+  }
+
+  private normalizeHexColor(token: string): string {
+    const hex = token.trim();
+    if (/^#[0-9a-f]{6}$/i.test(hex) || /^#[0-9a-f]{8}$/i.test(hex)) {
+      return hex.toLowerCase();
+    }
+
+    if (/^#[0-9a-f]{3}$/i.test(hex)) {
+      const r = hex[1];
+      const g = hex[2];
+      const b = hex[3];
+      return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+
+    return hex.toLowerCase();
   }
 
   private setupCommentOverlay(): void {
