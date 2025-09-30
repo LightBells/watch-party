@@ -90,6 +90,8 @@ class WatchPartyContent {
 
   private videoEventListenerCleanups: Array<() => void> = [];
 
+  private lastUserInteractionAt = 0;
+
   private toastContainer: HTMLDivElement | null = null;
 
   private readonly handleViewportChange = () => {
@@ -184,6 +186,43 @@ class WatchPartyContent {
     return new Promise((resolve) => {
       window.setTimeout(resolve, ms);
     });
+  }
+
+  private recordUserInteraction(): void {
+    this.lastUserInteractionAt = Date.now();
+  }
+
+  private hasRecentUserInteraction(windowMs = 2000): boolean {
+    if (!this.lastUserInteractionAt) {
+      return false;
+    }
+
+    return Date.now() - this.lastUserInteractionAt <= windowMs;
+  }
+
+  private isPlaybackControlTarget(target: EventTarget | null): boolean {
+    if (!this.videoElement || !(target instanceof Element)) {
+      return false;
+    }
+
+    if (target === this.videoElement) {
+      return true;
+    }
+
+    const candidates: Element[] = [];
+    const directParent = this.videoElement.parentElement;
+    if (directParent) {
+      candidates.push(directParent);
+    }
+
+    const labeledAncestor = this.videoElement.closest(
+      '.atvwebplayersdk-player-container, .atvwebplayersdk-player, .atvwebplayersdk-video-surface, [data-testid="video-player"], .video-player',
+    );
+    if (labeledAncestor instanceof Element) {
+      candidates.push(labeledAncestor);
+    }
+
+    return candidates.some((candidate) => candidate.contains(target));
   }
 
   private isViableVideoElement(element: HTMLVideoElement): boolean {
@@ -535,6 +574,33 @@ class WatchPartyContent {
 
     this.log('🎧 Setting up video event listeners...');
 
+    const playbackKeys = new Set([' ', 'Spacebar', 'Enter', 'MediaPlayPause', 'k', 'K']);
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (this.isPlaybackControlTarget(event.target) || event.composedPath().includes(this.videoElement as EventTarget)) {
+        this.recordUserInteraction();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!playbackKeys.has(event.key)) {
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        if (target.isContentEditable) {
+          return;
+        }
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.closest('#wp-room-popup, #wp-comment-input')) {
+          return;
+        }
+      }
+
+      this.recordUserInteraction();
+    };
+
     const handlePlay = () => {
       if (this.videoElement !== video) {
         return;
@@ -546,10 +612,21 @@ class WatchPartyContent {
         currentTime: this.videoElement?.currentTime,
       });
 
-      if (!this.isHost && this.isConnectedToRoom() && this.roomPlaybackStatus === 'paused') {
-        this.log('🚫 Blocking play emit because room is paused');
+      const userInitiatedPlay = this.hasRecentUserInteraction();
+
+      if (
+        !this.isHost &&
+        this.isConnectedToRoom() &&
+        this.roomPlaybackStatus === 'paused' &&
+        !userInitiatedPlay
+      ) {
+        this.log('🚫 Blocking play emit because room is paused and no recent user interaction was detected');
         this.syncLocalPlaybackStatus('paused');
         return;
+      }
+
+      if (userInitiatedPlay) {
+        this.lastUserInteractionAt = 0;
       }
 
       if (this.socket && this.socket.connected && !this.syncInProgress && this.shouldEmitPlaybackEvents()) {
@@ -605,11 +682,16 @@ class WatchPartyContent {
       }
     };
 
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+
     video.addEventListener('play', handlePlay, true);
     video.addEventListener('pause', handlePause, true);
     video.addEventListener('seeked', handleSeeked, true);
 
     this.videoEventListenerCleanups = [
+      () => document.removeEventListener('pointerdown', handlePointerDown, true),
+      () => document.removeEventListener('keydown', handleKeyDown, true),
       () => video.removeEventListener('play', handlePlay, true),
       () => video.removeEventListener('pause', handlePause, true),
       () => video.removeEventListener('seeked', handleSeeked, true),
