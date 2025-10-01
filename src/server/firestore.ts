@@ -10,11 +10,15 @@ export interface RoomRecord {
   [key: string]: unknown;
 }
 
-export interface MessageRecord {
+export interface CommentRecord {
   id?: string;
   roomId: string;
   message: string;
   userId: string;
+  username?: string;
+  commands?: string | null;
+  url?: string | null;
+  playbackTime?: number | null;
   createdAt?: Timestamp;
   [key: string]: unknown;
 }
@@ -26,19 +30,30 @@ export interface UserRecord {
   [key: string]: unknown;
 }
 
-const firestore = new Firestore({
-  projectId: process.env.FIRESTORE_PROJECT_ID,
-});
+let firestoreInstance: Firestore | null = null;
+
+const getFirestore = (): Firestore => {
+  if (firestoreInstance) {
+    return firestoreInstance;
+  }
+
+  const options = process.env.FIRESTORE_PROJECT_ID
+    ? { projectId: process.env.FIRESTORE_PROJECT_ID }
+    : undefined;
+
+  firestoreInstance = options ? new Firestore(options) : new Firestore();
+  return firestoreInstance;
+};
 
 const COLLECTIONS = {
   ROOMS: 'rooms',
   USERS: 'users',
-  MESSAGES: 'messages',
+  COMMENTS: 'comments',
 } as const;
 
 class FirestoreService {
   async createRoom(roomData: RoomRecord): Promise<RoomRecord> {
-    const roomRef = firestore.collection(COLLECTIONS.ROOMS).doc(roomData.id);
+    const roomRef = getFirestore().collection(COLLECTIONS.ROOMS).doc(roomData.id);
     await roomRef.set({
       ...roomData,
       createdAt: new Date(),
@@ -48,7 +63,7 @@ class FirestoreService {
   }
 
   async getRoom(roomId: string): Promise<RoomRecord | null> {
-    const roomRef = firestore.collection(COLLECTIONS.ROOMS).doc(roomId);
+    const roomRef = getFirestore().collection(COLLECTIONS.ROOMS).doc(roomId);
     const doc = await roomRef.get();
 
     if (!doc.exists) {
@@ -59,7 +74,7 @@ class FirestoreService {
   }
 
   async updateRoom(roomId: string, updateData: Partial<RoomRecord>): Promise<void> {
-    const roomRef = firestore.collection(COLLECTIONS.ROOMS).doc(roomId);
+    const roomRef = getFirestore().collection(COLLECTIONS.ROOMS).doc(roomId);
     await roomRef.update({
       ...updateData,
       updatedAt: new Date(),
@@ -67,40 +82,59 @@ class FirestoreService {
   }
 
   async deleteRoom(roomId: string): Promise<void> {
-    const roomRef = firestore.collection(COLLECTIONS.ROOMS).doc(roomId);
+    const roomRef = getFirestore().collection(COLLECTIONS.ROOMS).doc(roomId);
     await roomRef.delete();
   }
 
-  async addMessage(roomId: string, messageData: Omit<MessageRecord, 'roomId' | 'createdAt'>): Promise<string> {
-    const messagesRef = firestore.collection(COLLECTIONS.MESSAGES);
-    const messageRef = await messagesRef.add({
+  async addComment(
+    roomId: string,
+    commentData: Omit<CommentRecord, 'roomId' | 'createdAt'>,
+  ): Promise<string> {
+    const commentsRef = getFirestore().collection(COLLECTIONS.COMMENTS);
+    const commentRef = await commentsRef.add({
       roomId,
-      ...messageData,
+      ...commentData,
       createdAt: new Date(),
     });
-    return messageRef.id;
+    return commentRef.id;
   }
 
-  async getMessages(roomId: string, limit = 50): Promise<MessageRecord[]> {
-    const messagesRef = firestore
-      .collection(COLLECTIONS.MESSAGES)
+  async getComments(roomId: string, limit = 50): Promise<CommentRecord[]> {
+    const commentsRef = getFirestore()
+      .collection(COLLECTIONS.COMMENTS)
       .where('roomId', '==', roomId)
       .orderBy('createdAt', 'desc')
       .limit(limit);
 
-    const snapshot = await messagesRef.get();
-    const messages: MessageRecord[] = [];
+    const snapshot = await commentsRef.get();
+    const comments: CommentRecord[] = [];
 
     snapshot.forEach((doc) => {
-      const data = doc.data() as MessageRecord;
-      messages.push({ ...data, id: doc.id });
+      const data = doc.data() as CommentRecord & { createdAt?: unknown };
+      const createdAtRaw = data.createdAt;
+      let createdAt: Date | undefined;
+
+      if (createdAtRaw instanceof Date) {
+        createdAt = createdAtRaw;
+      } else if (
+        createdAtRaw &&
+        typeof createdAtRaw === 'object' &&
+        'toDate' in createdAtRaw &&
+        typeof (createdAtRaw as { toDate?: unknown }).toDate === 'function'
+      ) {
+        createdAt = (createdAtRaw as { toDate: () => Date }).toDate();
+      }
+
+      const playbackTime = typeof data.playbackTime === 'number' ? data.playbackTime : null;
+
+      comments.push({ ...data, id: doc.id, createdAt, playbackTime });
     });
 
-    return messages.reverse();
+    return comments.reverse();
   }
 
   async createUser(userData: UserRecord): Promise<UserRecord> {
-    const userRef = firestore.collection(COLLECTIONS.USERS).doc(userData.id);
+    const userRef = getFirestore().collection(COLLECTIONS.USERS).doc(userData.id);
     await userRef.set({
       ...userData,
       createdAt: new Date(),
@@ -110,7 +144,7 @@ class FirestoreService {
   }
 
   async updateUserActivity(userId: string): Promise<void> {
-    const userRef = firestore.collection(COLLECTIONS.USERS).doc(userId);
+    const userRef = getFirestore().collection(COLLECTIONS.USERS).doc(userId);
     await userRef.update({
       lastActiveAt: new Date(),
     });
@@ -123,7 +157,7 @@ class FirestoreService {
       return [];
     }
 
-    const userPromises = room.members.map((userId) => firestore.collection(COLLECTIONS.USERS).doc(userId).get());
+    const userPromises = room.members.map((userId) => getFirestore().collection(COLLECTIONS.USERS).doc(userId).get());
 
     const userDocs = await Promise.all(userPromises);
     return userDocs

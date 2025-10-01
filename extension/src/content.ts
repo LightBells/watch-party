@@ -30,6 +30,8 @@ type CommentPayload = {
   message: string;
   timestamp: number;
   commands?: string | null;
+  url?: string | null;
+  playbackTime?: number | null;
 };
 
 type CommentCommandOptions = {
@@ -85,6 +87,7 @@ type NavigateEventPayload = {
 class WatchPartyContent {
   private static readonly ROOM_HASH_KEY = 'watchparty-room';
   private static readonly MEMBER_HEARTBEAT_INTERVAL = 4000;
+  private static readonly MAX_CHAT_HISTORY_ENTRIES = 200;
 
   private static historyPatched = false;
   private socket: Socket | null = null;
@@ -128,6 +131,24 @@ class WatchPartyContent {
   private shareFeedbackTimeout: number | null = null;
 
   private commentOverlay: HTMLDivElement | null = null;
+
+  private chatHistoryContainer: HTMLDivElement | null = null;
+
+  private chatHistoryBody: HTMLDivElement | null = null;
+
+  private chatHistoryList: HTMLUListElement | null = null;
+
+  private chatHistoryEmptyState: HTMLDivElement | null = null;
+
+  private chatHistoryToggle: HTMLButtonElement | null = null;
+
+  private chatHistoryToggleIcon: HTMLSpanElement | null = null;
+
+  private chatHistoryExpanded = false;
+
+  private chatHistoryEventsBound = false;
+
+  private chatHistoryNeedsScroll = false;
 
   private overlayResizeObserver: ResizeObserver | null = null;
 
@@ -813,6 +834,18 @@ class WatchPartyContent {
         </button>
       </div>
       <div class="wp-comment-panel hidden" id="wp-comment-panel">
+        <div class="wp-chat-history" id="wp-chat-history">
+          <div class="wp-chat-history-header">
+            <button id="wp-chat-history-toggle" class="wp-chat-history-toggle" aria-expanded="false" type="button">
+              <span class="wp-chat-history-toggle-label">コメント履歴</span>
+              <span class="wp-chat-history-toggle-icon" id="wp-chat-history-toggle-icon">▸</span>
+            </button>
+          </div>
+          <div class="wp-chat-history-body" id="wp-chat-history-body">
+            <div class="wp-chat-history-empty" id="wp-chat-history-empty">コメントはまだありません</div>
+            <ul class="wp-chat-history-list" id="wp-chat-history-list"></ul>
+          </div>
+        </div>
         <div class="wp-comment-form">
           <input type="text" id="wp-command-text" placeholder="コマンド (例: red big)" autocomplete="off">
           <input type="text" id="wp-comment-text" placeholder="コメントを入力...">
@@ -824,6 +857,16 @@ class WatchPartyContent {
     document.body.appendChild(floatingButton);
     document.body.appendChild(roomPopup);
     document.body.appendChild(commentInput);
+
+    this.chatHistoryContainer = commentInput.querySelector('#wp-chat-history') as HTMLDivElement | null;
+    this.chatHistoryBody = commentInput.querySelector('#wp-chat-history-body') as HTMLDivElement | null;
+    this.chatHistoryList = commentInput.querySelector('#wp-chat-history-list') as HTMLUListElement | null;
+    this.chatHistoryEmptyState = commentInput.querySelector('#wp-chat-history-empty') as HTMLDivElement | null;
+    this.chatHistoryToggle = commentInput.querySelector('#wp-chat-history-toggle') as HTMLButtonElement | null;
+    this.chatHistoryToggleIcon = commentInput.querySelector('#wp-chat-history-toggle-icon') as HTMLSpanElement | null;
+    this.updateChatHistoryEmptyState();
+    this.bindChatHistoryEvents();
+    this.applyChatHistoryExpansion();
 
     this.bindUIEvents();
   }
@@ -918,6 +961,13 @@ class WatchPartyContent {
         icon.textContent = '‹';
       }
     }
+
+    const commentInputRoot = document.getElementById('wp-comment-input');
+    if (commentInputRoot) {
+      commentInputRoot.classList.toggle('expanded', isOpen);
+    }
+
+    this.applyChatHistoryExpansion();
   }
 
   private async joinRoom(): Promise<void> {
@@ -1082,9 +1132,11 @@ class WatchPartyContent {
     }
 
     if (this.socket?.connected) {
+      const playbackTime = this.getCurrentPlaybackTime();
       this.socket.emit('comment', {
         message,
         commands: normalizedCommands || undefined,
+        playbackTime: playbackTime ?? null,
       });
       if (commentInput) {
         commentInput.value = '';
@@ -1092,6 +1144,351 @@ class WatchPartyContent {
     } else {
       window.alert('ルームに接続していません');
     }
+  }
+
+  private getCurrentPlaybackTime(): number | null {
+    if (this.videoElement) {
+      const currentTime = this.videoElement.currentTime;
+      if (Number.isFinite(currentTime)) {
+        return Math.max(0, currentTime);
+      }
+    }
+
+    if (this.pendingVideoState && Number.isFinite(this.pendingVideoState.currentTime)) {
+      return Math.max(0, this.pendingVideoState.currentTime);
+    }
+
+    return null;
+  }
+
+  private ensureChatHistoryRefs(): void {
+    if (!this.chatHistoryContainer) {
+      this.chatHistoryContainer = document.getElementById('wp-chat-history') as HTMLDivElement | null;
+    }
+    if (!this.chatHistoryBody) {
+      this.chatHistoryBody = document.getElementById('wp-chat-history-body') as HTMLDivElement | null;
+    }
+    if (!this.chatHistoryList) {
+      this.chatHistoryList = document.getElementById('wp-chat-history-list') as HTMLUListElement | null;
+    }
+    if (!this.chatHistoryEmptyState) {
+      this.chatHistoryEmptyState = document.getElementById('wp-chat-history-empty') as HTMLDivElement | null;
+    }
+    if (!this.chatHistoryToggle) {
+      this.chatHistoryToggle = document.getElementById('wp-chat-history-toggle') as HTMLButtonElement | null;
+    }
+    if (!this.chatHistoryToggleIcon) {
+      this.chatHistoryToggleIcon = document.getElementById('wp-chat-history-toggle-icon') as HTMLSpanElement | null;
+    }
+  }
+
+  private bindChatHistoryEvents(): void {
+    this.ensureChatHistoryRefs();
+    if (this.chatHistoryEventsBound) {
+      return;
+    }
+
+    if (this.chatHistoryToggle) {
+      this.chatHistoryToggle.addEventListener('click', () => this.toggleChatHistory());
+    }
+
+    if (this.chatHistoryList) {
+      this.chatHistoryList.addEventListener('click', (event) => this.handleChatHistoryClick(event));
+    }
+
+    this.chatHistoryEventsBound = true;
+  }
+
+  private updateChatHistoryEmptyState(): void {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryEmptyState || !this.chatHistoryList) {
+      return;
+    }
+
+    const hasEntries = this.chatHistoryList.children.length > 0;
+    if (hasEntries) {
+      this.chatHistoryEmptyState.classList.add('hidden');
+    } else {
+      this.chatHistoryEmptyState.classList.remove('hidden');
+    }
+  }
+
+  private trimChatHistory(): void {
+    if (!this.chatHistoryList) {
+      return;
+    }
+
+    while (this.chatHistoryList.children.length > WatchPartyContent.MAX_CHAT_HISTORY_ENTRIES) {
+      const firstChild = this.chatHistoryList.firstChild;
+      if (!firstChild) {
+        break;
+      }
+      this.chatHistoryList.removeChild(firstChild);
+    }
+  }
+
+  private toggleChatHistory(force?: boolean): void {
+    const nextState = typeof force === 'boolean' ? force : !this.chatHistoryExpanded;
+    if (nextState === this.chatHistoryExpanded) {
+      if (nextState) {
+        this.chatHistoryNeedsScroll = true;
+        this.scrollChatHistoryToLatest();
+      }
+      return;
+    }
+
+    this.chatHistoryExpanded = nextState;
+    this.chatHistoryNeedsScroll = this.chatHistoryExpanded;
+    if (this.chatHistoryExpanded) {
+      this.chatHistoryNeedsScroll = true;
+    }
+    this.applyChatHistoryExpansion();
+  }
+
+  private applyChatHistoryExpansion(): void {
+    this.ensureChatHistoryRefs();
+    const panel = document.getElementById('wp-comment-panel');
+    const isPanelOpen = Boolean(panel && !panel.classList.contains('hidden'));
+    const shouldExpand = this.chatHistoryExpanded && isPanelOpen;
+
+    if (this.chatHistoryContainer) {
+      this.chatHistoryContainer.classList.toggle('expanded', shouldExpand);
+    }
+    if (this.chatHistoryBody) {
+      this.chatHistoryBody.classList.toggle('expanded', shouldExpand);
+    }
+    if (this.chatHistoryToggle) {
+      this.chatHistoryToggle.setAttribute('aria-expanded', String(this.chatHistoryExpanded));
+    }
+    if (this.chatHistoryToggleIcon) {
+      this.chatHistoryToggleIcon.textContent = this.chatHistoryExpanded ? '▾' : '▸';
+    }
+
+    if (shouldExpand) {
+      this.chatHistoryNeedsScroll = true;
+      this.scrollChatHistoryToLatest();
+    }
+  }
+
+  private handleChatHistoryClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (!target) {
+      return;
+    }
+
+    if (target.closest('.wp-chat-history-toggle')) {
+      return;
+    }
+
+    const entry = target.closest('.wp-chat-entry') as HTMLLIElement | null;
+    if (!entry) {
+      return;
+    }
+
+    const url = entry.dataset.url ?? '';
+    const playbackRaw = entry.dataset.playback ?? '';
+    const playbackTime = Number.parseFloat(playbackRaw);
+
+    let navigationTriggered = false;
+    if (url) {
+      const resolvedUrl = this.currentRoom ? this.applyRoomParamToUrl(url, this.currentRoom) : url;
+      if (!this.urlsMatchForSync(resolvedUrl, window.location.href)) {
+        this.navigateToUrl(resolvedUrl);
+        if (!this.isHost) {
+          this.requestMemberNavigation(resolvedUrl);
+        }
+        navigationTriggered = true;
+      }
+    }
+
+    if (!navigationTriggered && Number.isFinite(playbackTime)) {
+      this.seekToPlaybackTime(playbackTime);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (navigationTriggered) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  private seekToPlaybackTime(seconds: number): void {
+    const targetTime = Math.max(0, seconds);
+
+    if (this.videoElement) {
+      this.videoElement.currentTime = targetTime;
+      if (this.roomPlaybackStatus === 'playing') {
+        void this.videoElement.play().catch(() => undefined);
+      }
+      this.pendingVideoState = {
+        isPlaying: !this.videoElement.paused,
+        currentTime: this.videoElement.currentTime,
+        lastUpdateTime: Date.now(),
+      };
+    } else {
+      this.pendingVideoState = {
+        isPlaying: this.roomPlaybackStatus === 'playing',
+        currentTime: targetTime,
+        lastUpdateTime: Date.now(),
+      };
+    }
+
+    if (this.isHost) {
+      this.broadcastHostVideoState('chat-history-seek');
+    }
+  }
+
+  private appendChatHistoryEntry(
+    comment: CommentPayload,
+    options: {skipTrim?: boolean; scroll?: boolean} = {},
+  ): void {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryList) {
+      return;
+    }
+
+    const item = document.createElement('li');
+    item.className = 'wp-chat-entry';
+
+    if (comment.userId === this.currentUser) {
+      item.classList.add('wp-chat-entry--self');
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'wp-chat-entry__meta';
+
+    const userSpan = document.createElement('span');
+    userSpan.className = 'wp-chat-entry__user';
+    userSpan.textContent = comment.username || comment.userId;
+    meta.appendChild(userSpan);
+
+    const playbackLabel = this.formatPlaybackTimeLabel(comment.playbackTime ?? null);
+    if (playbackLabel) {
+      const playbackSpan = document.createElement('span');
+      playbackSpan.className = 'wp-chat-entry__timecode';
+      playbackSpan.textContent = playbackLabel;
+      meta.appendChild(playbackSpan);
+    }
+
+    const timestampLabel = this.formatTimestampLabel(comment.timestamp);
+    if (timestampLabel) {
+      const timestampSpan = document.createElement('span');
+      timestampSpan.className = 'wp-chat-entry__timestamp';
+      timestampSpan.textContent = timestampLabel;
+      meta.appendChild(timestampSpan);
+    }
+
+    item.appendChild(meta);
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'wp-chat-entry__message';
+    messageDiv.textContent = comment.message;
+    item.appendChild(messageDiv);
+
+    if (typeof comment.playbackTime === 'number' && Number.isFinite(comment.playbackTime)) {
+      item.dataset.playback = String(comment.playbackTime);
+    } else {
+      delete item.dataset.playback;
+    }
+
+    if (comment.url) {
+      item.dataset.url = comment.url;
+    } else {
+      delete item.dataset.url;
+    }
+
+    this.chatHistoryList.appendChild(item);
+
+    if (!options.skipTrim) {
+      this.trimChatHistory();
+    }
+
+    this.chatHistoryNeedsScroll = true;
+
+    this.updateChatHistoryEmptyState();
+
+    if (options.scroll !== false && this.chatHistoryExpanded) {
+      this.scrollChatHistoryToLatest();
+    }
+  }
+
+  private setChatHistory(comments: CommentPayload[]): void {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryList) {
+      return;
+    }
+
+    this.chatHistoryList.innerHTML = '';
+
+    comments.forEach((comment) => {
+      this.appendChatHistoryEntry(comment, { skipTrim: true, scroll: false });
+    });
+
+    this.trimChatHistory();
+    this.updateChatHistoryEmptyState();
+    this.chatHistoryNeedsScroll = true;
+    this.applyChatHistoryExpansion();
+    if (this.chatHistoryExpanded) {
+      this.scrollChatHistoryToLatest();
+    }
+  }
+
+  private scrollChatHistoryToLatest(): void {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryContainer) {
+      return;
+    }
+
+    if (!this.chatHistoryNeedsScroll) {
+      return;
+    }
+
+    if (!this.chatHistoryExpanded) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (!this.chatHistoryContainer) {
+        return;
+      }
+      this.chatHistoryContainer.scrollTop = this.chatHistoryContainer.scrollHeight;
+      this.chatHistoryNeedsScroll = false;
+    });
+  }
+
+  private formatTimestampLabel(timestamp: number): string {
+    if (!Number.isFinite(timestamp)) {
+      return '';
+    }
+
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
+
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  private formatPlaybackTimeLabel(playbackTime: number | null): string | null {
+    if (playbackTime === null || !Number.isFinite(playbackTime)) {
+      return null;
+    }
+
+    const totalSeconds = Math.max(0, Math.floor(playbackTime));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    const minuteString = minutes.toString().padStart(hours > 0 ? 2 : 1, '0');
+    const secondString = seconds.toString().padStart(2, '0');
+
+    if (hours > 0) {
+      return `@${hours}:${minuteString}:${secondString}`;
+    }
+
+    return `@${minutes}:${secondString}`;
   }
 
   private showRoomInfo(): void {
@@ -1292,11 +1689,27 @@ class WatchPartyContent {
     this.socket.on('comment', (data: CommentPayload) => {
       this.log('Received comment:', data);
       const isOwnComment = data.userId === this.currentUser;
+      this.appendChatHistoryEntry(data);
       this.showComment(data.message, data.username || data.userId, isOwnComment, data.commands ?? undefined);
 
       void chrome.runtime.sendMessage({
         action: 'chatMessage',
         data,
+      });
+    });
+
+    this.socket.on('comment-history', (items: CommentPayload[]) => {
+      if (!Array.isArray(items) || items.length === 0) {
+        return;
+      }
+
+      this.log('Received comment history batch:', items.length);
+      this.setChatHistory(items);
+      items.forEach((comment) => {
+        void chrome.runtime.sendMessage({
+          action: 'chatMessage',
+          data: comment,
+        });
       });
     });
 

@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 
+import firestoreService, { type CommentRecord } from './firestore';
+
 dotenv.config();
 
 const DEBUG_MODE = process.env.DEBUG_MODE === 'true';
@@ -57,11 +59,23 @@ interface Room {
   currentUrl: string | null;
   previousHostId: string | null;
   hostReassignTimer?: NodeJS.Timeout | null;
+  commentHistory: CommentBroadcastPayload[];
 }
 
 interface CommentPayload {
   message: string;
   commands?: string | null;
+  playbackTime?: number | null;
+}
+
+interface CommentBroadcastPayload {
+  userId: string;
+  username?: string;
+  message: string;
+  commands?: string | null;
+  url: string | null;
+  playbackTime: number | null;
+  timestamp: number;
 }
 
 interface PlaybackPayload {
@@ -97,12 +111,8 @@ interface ServerToClientEvents {
     userId: string;
     timestamp: number;
   }) => void;
-  comment: (data: {
-    userId: string;
-    username?: string;
-    message: string;
-    timestamp: number;
-  }) => void;
+  comment: (data: CommentBroadcastPayload) => void;
+  'comment-history': (data: CommentBroadcastPayload[]) => void;
   'user-joined': (data: { userId: string; members: RoomMember[]; timestamp: number }) => void;
   'user-left': (data: { userId: string; members: RoomMember[]; timestamp: number }) => void;
   'host-changed': (data: { newHost: string; timestamp: number }) => void;
@@ -142,6 +152,7 @@ interface NavigatePayload {
 
 const rooms: Map<string, Room> = new Map();
 const userSessions: Map<string, Set<string>> = new Map();
+const COMMENT_HISTORY_LIMIT = 200;
 
 const generateToken = (userId: string, roomId: string): string =>
   jwt.sign({ userId, roomId }, JWT_SECRET, { expiresIn: '24h' });
@@ -178,6 +189,23 @@ const emitMemberStatus = (room: Room, changedUserId: string | null = null): void
     changedUserId,
     timestamp: Date.now(),
   });
+};
+
+const buildCommentPayload = (comment: CommentRecord): CommentBroadcastPayload => ({
+  userId: comment.userId,
+  username: typeof comment.username === 'string' ? comment.username : undefined,
+  message: comment.message,
+  commands: typeof comment.commands === 'string' ? comment.commands : null,
+  url: typeof comment.url === 'string' ? comment.url : null,
+  playbackTime: typeof comment.playbackTime === 'number' ? comment.playbackTime : null,
+  timestamp: comment.createdAt instanceof Date ? comment.createdAt.getTime() : Date.now(),
+});
+
+const addCommentToRoomHistory = (room: Room, comment: CommentBroadcastPayload): void => {
+  room.commentHistory.push(comment);
+  while (room.commentHistory.length > COMMENT_HISTORY_LIMIT) {
+    room.commentHistory.shift();
+  }
 };
 
 setInterval(() => {
@@ -229,6 +257,7 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
       currentUrl: pageUrl ?? null,
       previousHostId: userId,
       hostReassignTimer: null,
+      commentHistory: [],
     });
   }
 
@@ -302,6 +331,7 @@ io.on('connection', (socket) => {
 
   const room = rooms.get(roomId);
   if (room) {
+    room.commentHistory ??= [];
     let member = room.members.get(userId);
 
     if (!member) {
@@ -339,6 +369,45 @@ io.on('connection', (socket) => {
     }
     const playbackStatus: PlaybackStatus = room.videoState.isPlaying ? 'playing' : 'paused';
     room.playbackStatus = playbackStatus;
+
+    const emitHistory = (history: CommentBroadcastPayload[]): void => {
+      if (history.length > 0) {
+        socket.emit('comment-history', history);
+      }
+    };
+
+    if (room.commentHistory.length > 0) {
+      emitHistory(room.commentHistory);
+    } else if (USE_FIRESTORE) {
+      void firestoreService
+        .getComments(roomId, 100)
+        .then((comments) => {
+          if (comments.length === 0) {
+            return;
+          }
+
+          const fetchedHistory = comments.map((comment) => buildCommentPayload(comment));
+          const dedupedMap = new Map<string, CommentBroadcastPayload>();
+
+          const appendToMap = (entry: CommentBroadcastPayload): void => {
+            const key = `${entry.timestamp}:${entry.userId}:${entry.message}`;
+            dedupedMap.set(key, entry);
+          };
+
+          fetchedHistory.forEach(appendToMap);
+          room.commentHistory.forEach(appendToMap);
+
+          const mergedHistory = Array.from(dedupedMap.values()).sort(
+            (a, b) => a.timestamp - b.timestamp,
+          );
+
+          room.commentHistory = mergedHistory.slice(-COMMENT_HISTORY_LIMIT);
+          emitHistory(room.commentHistory);
+        })
+        .catch((error: unknown) => {
+          debugLog('Failed to load comment history', error);
+        });
+    }
     socket.emit('room-state', {
       members: getRoomMembersSnapshot(room),
       videoState: room.videoState,
@@ -363,13 +432,41 @@ io.on('connection', (socket) => {
     }
 
     const member = activeRoom.members.get(userId);
-    const payload = {
+    const currentUrl = activeRoom.currentUrl ?? null;
+    const playbackTime =
+      typeof data.playbackTime === 'number'
+        ? data.playbackTime
+        : Number.isFinite(activeRoom.videoState.currentTime)
+          ? activeRoom.videoState.currentTime
+          : null;
+
+    const payload: CommentBroadcastPayload = {
       userId,
       username: member?.username,
       message: data.message,
       commands: data.commands ?? null,
+      url: currentUrl,
+      playbackTime: playbackTime ?? null,
       timestamp: Date.now(),
     };
+
+    activeRoom.commentHistory ??= [];
+    addCommentToRoomHistory(activeRoom, payload);
+
+    if (USE_FIRESTORE) {
+      void firestoreService
+        .addComment(roomId, {
+          message: data.message,
+          userId,
+          username: member?.username,
+          commands: data.commands ?? null,
+          url: currentUrl,
+          playbackTime: playbackTime ?? null,
+        })
+        .catch((error: unknown) => {
+          debugLog('Failed to persist comment', error);
+        });
+    }
 
     io.to(roomId).emit('comment', payload);
   });
