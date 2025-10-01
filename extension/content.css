@@ -603,6 +603,7 @@
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
     cursor: pointer;
     transition: background-color 0.2s ease;
+    position: relative;
 }
 
 .wp-chat-entry--self {
@@ -642,6 +643,27 @@
     color: #212529;
     white-space: pre-wrap;
     word-wrap: break-word;
+}
+
+.wp-chat-entry__media-info {
+    display: none;
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.92);
+    color: #f8f9fa;
+    font-size: 11px;
+    line-height: 1.4;
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.25);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 320px;
+    pointer-events: none;
+}
+
+.wp-chat-entry--has-media:hover .wp-chat-entry__media-info,
+.wp-chat-entry--has-media:focus-within .wp-chat-entry__media-info {
+    display: block;
 }
 
 #wp-command-text {

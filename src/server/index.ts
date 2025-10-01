@@ -66,6 +66,7 @@ interface CommentPayload {
   message: string;
   commands?: string | null;
   playbackTime?: number | null;
+  mediaInfo?: string | null;
 }
 
 interface CommentBroadcastPayload {
@@ -75,6 +76,7 @@ interface CommentBroadcastPayload {
   commands?: string | null;
   url: string | null;
   playbackTime: number | null;
+  mediaInfo?: string | null;
   timestamp: number;
 }
 
@@ -153,9 +155,32 @@ interface NavigatePayload {
 const rooms: Map<string, Room> = new Map();
 const userSessions: Map<string, Set<string>> = new Map();
 const COMMENT_HISTORY_LIMIT = 200;
+const MEDIA_INFO_MAX_LENGTH = 300;
 
 const generateToken = (userId: string, roomId: string): string =>
   jwt.sign({ userId, roomId }, JWT_SECRET, { expiresIn: '24h' });
+
+const normalizeMediaInfo = (raw: unknown): string | null => {
+  if (typeof raw !== 'string') {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.replace(/\s+/g, ' ');
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > MEDIA_INFO_MAX_LENGTH) {
+    return `${normalized.slice(0, MEDIA_INFO_MAX_LENGTH).trimEnd()}...`;
+  }
+
+  return normalized;
+};
 
 const verifyToken = (token: string): TokenPayload | null => {
   try {
@@ -198,6 +223,7 @@ const buildCommentPayload = (comment: CommentRecord): CommentBroadcastPayload =>
   commands: typeof comment.commands === 'string' ? comment.commands : null,
   url: typeof comment.url === 'string' ? comment.url : null,
   playbackTime: typeof comment.playbackTime === 'number' ? comment.playbackTime : null,
+  mediaInfo: normalizeMediaInfo(comment.mediaInfo),
   timestamp: comment.createdAt instanceof Date ? comment.createdAt.getTime() : Date.now(),
 });
 
@@ -440,6 +466,8 @@ io.on('connection', (socket) => {
           ? activeRoom.videoState.currentTime
           : null;
 
+    const mediaInfo = normalizeMediaInfo(data.mediaInfo);
+
     const payload: CommentBroadcastPayload = {
       userId,
       username: member?.username,
@@ -447,6 +475,7 @@ io.on('connection', (socket) => {
       commands: data.commands ?? null,
       url: currentUrl,
       playbackTime: playbackTime ?? null,
+      mediaInfo: mediaInfo ?? null,
       timestamp: Date.now(),
     };
 
@@ -462,6 +491,7 @@ io.on('connection', (socket) => {
           commands: data.commands ?? null,
           url: currentUrl,
           playbackTime: playbackTime ?? null,
+          mediaInfo: mediaInfo ?? null,
         })
         .catch((error: unknown) => {
           debugLog('Failed to persist comment', error);

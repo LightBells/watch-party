@@ -8,6 +8,10 @@ import {
 } from '../constants';
 import type {CommentCommandOptions, CommentPayload} from '../types';
 
+const DANIME_HOST_FRAGMENT = 'animestore.docomo.ne.jp';
+const DANIME_MEDIA_INFO_SELECTOR = '#backInfo > div > div[class="backInfoTxt1"], #backInfo > div > div[class="backInfoTxt2"]';
+const MEDIA_INFO_MAX_LENGTH = 300;
+
 export type ChatFeature = {
   sendComment(this: WatchPartyContent): void;
   ensureChatHistoryRefs(this: WatchPartyContent): void;
@@ -33,11 +37,14 @@ export type ChatFeature = {
     displayName: string,
     isOwnComment?: boolean,
     commandString?: string | null,
+    mediaInfo?: string | null,
   ): void;
   parseCommentCommands(
     this: WatchPartyContent,
     commandString?: string | null,
   ): CommentCommandOptions;
+  collectCurrentMediaInfo(this: WatchPartyContent): string | null;
+  collectDanimeMediaInfo(this: WatchPartyContent): string | null;
   normalizeHexColor(this: WatchPartyContent, token: string): string;
   setupCommentOverlay(this: WatchPartyContent): void;
   ensureCommentOverlay(this: WatchPartyContent): HTMLDivElement | null;
@@ -59,10 +66,12 @@ export const chatFeature: ChatFeature = {
 
     if (this.socket?.connected) {
       const playbackTime = this.getCurrentPlaybackTime();
+      const mediaInfo = this.collectCurrentMediaInfo();
       this.socket.emit('comment', {
         message,
         commands: normalizedCommands || undefined,
         playbackTime: playbackTime ?? null,
+        mediaInfo: mediaInfo ?? undefined,
       });
       if (commentInput) {
         commentInput.value = '';
@@ -264,6 +273,9 @@ export const chatFeature: ChatFeature = {
     const item = document.createElement('li');
     item.className = 'wp-chat-entry';
 
+    // Enable keyboard focus so hover media info can also appear via focus.
+    item.tabIndex = 0;
+
     if (comment.userId === this.currentUser) {
       item.classList.add('wp-chat-entry--self');
     }
@@ -298,6 +310,14 @@ export const chatFeature: ChatFeature = {
     messageDiv.className = 'wp-chat-entry__message';
     messageDiv.textContent = comment.message;
     item.appendChild(messageDiv);
+
+    const mediaInfoText = typeof comment.mediaInfo === 'string' ? comment.mediaInfo.trim() : '';
+    if (mediaInfoText) {
+      item.classList.add('wp-chat-entry--has-media');
+      item.dataset.mediaInfo = mediaInfoText;
+      item.title = mediaInfoText;
+      messageDiv.setAttribute('title', mediaInfoText);
+    }
 
     if (typeof comment.playbackTime === 'number' && Number.isFinite(comment.playbackTime)) {
       item.dataset.playback = String(comment.playbackTime);
@@ -409,6 +429,7 @@ export const chatFeature: ChatFeature = {
     displayName: string,
     isOwnComment = false,
     commandString?: string | null,
+    mediaInfo?: string | null,
   ): void {
     const overlay = this.ensureCommentOverlay();
     if (!overlay) {
@@ -426,6 +447,12 @@ export const chatFeature: ChatFeature = {
     commentElement.classList.add('watch-party-comment');
     if (isOwnComment) {
       commentElement.classList.add('watch-party-comment--self');
+    }
+
+    const tooltip = typeof mediaInfo === 'string' ? mediaInfo.trim() : '';
+    if (tooltip) {
+      commentElement.dataset.mediaInfo = tooltip;
+      commentElement.title = tooltip;
     }
 
     commentElement.innerHTML = `
@@ -586,6 +613,52 @@ export const chatFeature: ChatFeature = {
     });
 
     return options;
+  },
+
+  collectCurrentMediaInfo(this: WatchPartyContent): string | null {
+    try {
+      if (window.location.hostname.includes(DANIME_HOST_FRAGMENT)) {
+        return this.collectDanimeMediaInfo();
+      }
+    } catch (error) {
+      this.log('Failed to resolve media info host check', error);
+    }
+    return null;
+  },
+
+  collectDanimeMediaInfo(this: WatchPartyContent): string | null {
+    try {
+      const nodes = document.querySelectorAll<HTMLElement>(DANIME_MEDIA_INFO_SELECTOR);
+      if (!nodes.length) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      nodes.forEach((node) => {
+        const text = node.textContent?.replace(/\s+/g, ' ').trim();
+        if (text && !parts.includes(text)) {
+          parts.push(text);
+        }
+      });
+
+      if (!parts.length) {
+        return null;
+      }
+
+      const combined = parts.join(' / ');
+      if (!combined) {
+        return null;
+      }
+
+      if (combined.length > MEDIA_INFO_MAX_LENGTH) {
+        return `${combined.slice(0, MEDIA_INFO_MAX_LENGTH).trimEnd()}...`;
+      }
+
+      return combined;
+    } catch (error) {
+      this.log('Failed to collect d-anime media info', error);
+      return null;
+    }
   },
 
   normalizeHexColor(this: WatchPartyContent, token: string): string {

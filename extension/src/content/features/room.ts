@@ -282,7 +282,13 @@ export const roomFeature: RoomFeature = {
       this.log('Received comment:', data);
       const isOwnComment = data.userId === this.currentUser;
       this.appendChatHistoryEntry(data);
-      this.showComment(data.message, data.username || data.userId, isOwnComment, data.commands ?? undefined);
+      this.showComment(
+        data.message,
+        data.username || data.userId,
+        isOwnComment,
+        data.commands ?? undefined,
+        data.mediaInfo ?? null,
+      );
 
       void chrome.runtime.sendMessage({
         action: 'chatMessage',

@@ -30,6 +30,7 @@ type CommentPayload = {
   commands?: string | null;
   url?: string | null;
   playbackTime?: number | null;
+  mediaInfo?: string | null;
 };
 
 type CommentCommandOptions = {
