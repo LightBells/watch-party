@@ -25,6 +25,27 @@ describe('coreFeature', () => {
     expect(coreFeature.shouldEmitPlaybackEvents.call(base as never)).toBe(true);
   });
 
+  it('does not mark as awaiting initial state when no room is active after init', async () => {
+    const context = {
+      loadDebugMode: jest.fn(async () => undefined),
+      detectVideoElement: jest.fn(async () => undefined),
+      createWatchPartyUI: jest.fn(),
+      setupInteractionHandlers: jest.fn(),
+      setupMessageListener: jest.fn(),
+      monitorUrlChanges: jest.fn(),
+      restoreRoomState: jest.fn(async () => undefined),
+      handleDeepLink: jest.fn(async () => undefined),
+      currentRoom: null,
+      isHost: false,
+      initialVideoStateApplied: false,
+      awaitingInitialState: true,
+    };
+
+    await coreFeature.init.call(context as never);
+
+    expect(context.awaitingInitialState).toBe(false);
+  });
+
   it('resolves tab id from chrome runtime message and falls back to timestamp when unavailable', async () => {
     const sendMessage = jest.fn(async () => ({ tabId: 777 }));
     (global as unknown as { chrome: unknown }).chrome = {

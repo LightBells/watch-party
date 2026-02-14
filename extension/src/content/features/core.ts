@@ -26,7 +26,7 @@ export const coreFeature: CoreFeature = {
     this.monitorUrlChanges();
     await this.restoreRoomState();
     await this.handleDeepLink();
-    this.awaitingInitialState = !this.isHost;
+    this.awaitingInitialState = Boolean(this.currentRoom && !this.isHost && !this.initialVideoStateApplied);
   },
 
   async loadDebugMode(this: WatchPartyContent): Promise<void> {

@@ -147,4 +147,43 @@ describe('videoFeature manipulation behavior', () => {
       userId: 'user-1',
     });
   });
+
+  it('does not block local play when not connected to any room', () => {
+    const { video, handlers } = createMockVideo();
+    video.currentTime = 8;
+
+    Object.defineProperty(global, 'document', {
+      configurable: true,
+      value: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+
+    const syncLocalPlaybackStatus = jest.fn();
+    const context = {
+      videoElement: video,
+      videoEventListenersBoundElement: null,
+      videoEventListenerCleanups: [] as Array<() => void>,
+      socket: null,
+      currentUser: null,
+      isHost: false,
+      syncInProgress: false,
+      roomPlaybackStatus: 'paused',
+      lastUserInteractionAt: 0,
+      log: jest.fn(),
+      teardownVideoListeners: jest.fn(),
+      isPlaybackControlTarget: jest.fn(() => true),
+      recordUserInteraction: jest.fn(),
+      hasRecentUserInteraction: jest.fn(() => false),
+      isConnectedToRoom: jest.fn(() => false),
+      shouldEmitPlaybackEvents: jest.fn(() => true),
+      syncLocalPlaybackStatus,
+    };
+
+    videoFeature.setupVideoListeners.call(context as never, video as never);
+    handlers.get('play')?.();
+
+    expect(syncLocalPlaybackStatus).not.toHaveBeenCalled();
+  });
 });
