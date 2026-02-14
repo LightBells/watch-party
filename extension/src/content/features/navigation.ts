@@ -121,6 +121,14 @@ export const navigationFeature: NavigationFeature = {
       return;
     }
 
+    if (!this.currentRoom) {
+      this.lastKnownUrl = newUrl;
+      this.currentRoomUrl = null;
+      this.debugNavigation('onUrlChanged:skip-no-room', {newUrl});
+      await this.handleDeepLink();
+      return;
+    }
+
     if (!this.socket?.connected) {
       if (!this.isHost) {
         const expectedUrl = this.currentRoomUrl ?? previousUrl;

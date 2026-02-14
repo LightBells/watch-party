@@ -88,6 +88,11 @@ export const coreFeature: CoreFeature = {
   },
 
   shouldEmitPlaybackEvents(this: WatchPartyContent): boolean {
+    if (!this.currentRoom || !this.socket?.connected) {
+      this.log('🚫 Suppressing playback event (not connected to room)');
+      return false;
+    }
+
     if (this.isHost) {
       return true;
     }
