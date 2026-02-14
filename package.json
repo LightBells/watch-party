@@ -10,7 +10,9 @@
     "start": "node dist/server/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server/index.ts",
     "lint": "eslint . --ext .ts",
-    "test": "jest",
+    "test": "npm run build:server && jest --runInBand",
+    "test:server:e2e": "npm run build:server && jest --runInBand tests/server/server.e2e.test.ts",
+    "test:frontend:dom": "jest --runInBand tests/frontend/ui.dom.test.ts",
     "gcp-build": "npm run build"
   },
   "keywords": [
