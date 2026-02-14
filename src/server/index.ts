@@ -158,11 +158,13 @@ interface InterServerEvents {}
 interface SocketData {
   userId: string;
   roomId: string;
+  username?: string;
 }
 
 interface TokenPayload extends JwtPayload {
   userId: string;
   roomId: string;
+  username?: string;
 }
 
 interface NavigatePayload {
@@ -174,8 +176,8 @@ const userSessions: Map<string, Set<string>> = new Map();
 const COMMENT_HISTORY_LIMIT = 200;
 const MEDIA_INFO_MAX_LENGTH = 300;
 
-const generateToken = (userId: string, roomId: string): string =>
-  jwt.sign({ userId, roomId }, JWT_SECRET, { expiresIn: '24h' });
+const generateToken = (userId: string, roomId: string, username: string): string =>
+  jwt.sign({ userId, roomId, username }, JWT_SECRET, { expiresIn: '24h' });
 
 const normalizeMediaInfo = (raw: unknown): string | null => {
   if (typeof raw !== 'string') {
@@ -339,7 +341,7 @@ app.post('/api/join-room', (req: Request<unknown, unknown, JoinRoomRequest>, res
     room.currentUrl = pageUrl;
   }
 
-  const token = generateToken(userId, roomId);
+  const token = generateToken(userId, roomId, username);
   const playbackStatus: PlaybackStatus = room.videoState.isPlaying ? 'playing' : 'paused';
   room.playbackStatus = playbackStatus;
 
@@ -365,11 +367,12 @@ io.use((socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEv
 
   socket.data.userId = decoded.userId;
   socket.data.roomId = decoded.roomId;
+  socket.data.username = typeof decoded.username === 'string' ? decoded.username : undefined;
   return next();
 });
 
 io.on('connection', (socket) => {
-  const { userId, roomId } = socket.data;
+  const { userId, roomId, username } = socket.data;
 
   if (!userId || !roomId) {
     debugLog('Socket missing authentication data, disconnecting');
@@ -392,7 +395,7 @@ io.on('connection', (socket) => {
     if (!member) {
       member = {
         id: userId,
-        username: `Member-${userId.slice(0, 6)}`,
+        username: username ?? `Member-${userId.slice(0, 6)}`,
         joinedAt: Date.now(),
         status: 'online',
         lastHeartbeatAt: Date.now(),

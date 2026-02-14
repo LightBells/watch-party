@@ -427,8 +427,19 @@ describe('server e2e', () => {
       const reconnectSocket = connectSocket(baseUrl, hostJoin.token);
 
       try {
-        const roomState = await waitForEvent<{ isHost: boolean }>(reconnectSocket, 'room-state', 5000);
+        const roomState = await waitForEvent<{
+          isHost: boolean;
+          members: Array<{ id: string; username: string }>;
+        }>(reconnectSocket, 'room-state', 5000);
         expect(roomState.isHost).toBe(true);
+        expect(roomState.members).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: hostJoin.userId,
+              username: 'host-user',
+            }),
+          ]),
+        );
 
         await expect(
           expectNoEvent(memberSocket, 'host-changed', TEST_HOST_REASSIGN_DELAY_MS + 1000),
