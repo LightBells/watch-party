@@ -240,4 +240,60 @@ describe('roomFeature', () => {
     playHandler?.({ currentTime: 25, userId: 'OTHER', timestamp: 1 });
     expect(context.syncVideo).toHaveBeenCalledWith(true, 25, 1);
   });
+
+  it('does not rebroadcast host sync when a new user joins during playback', async () => {
+    const { socket, handlers } = buildSocket();
+    (io as unknown as jest.Mock).mockReturnValue(socket);
+
+    const context = {
+      socket: null,
+      serverUrl: 'http://localhost:3000',
+      currentRoom: 'ROOM1',
+      currentUser: 'HOST1',
+      isHost: true,
+      members: [{ id: 'HOST1', username: 'host' }],
+      currentRoomUrl: 'https://example.com/watch#watchparty-room=ROOM1',
+      authToken: null,
+      initialVideoStateApplied: true,
+      awaitingInitialState: false,
+      roomPlaybackStatus: 'playing',
+      debugNavigation: jest.fn(),
+      log: jest.fn(),
+      updateStatus: jest.fn(),
+      showRoomInfo: jest.fn(),
+      startMemberHeartbeat: jest.fn(),
+      broadcastCurrentUrl: jest.fn(),
+      broadcastHostVideoState: jest.fn(),
+      flushPendingVideoState: jest.fn(),
+      stopMemberHeartbeat: jest.fn(),
+      stopHostUrlHeartbeat: jest.fn(),
+      updateHostHeartbeat: jest.fn(),
+      updateMembers: jest.fn(),
+      syncLocalPlaybackStatus: jest.fn(),
+      syncRoomUrl: jest.fn(),
+      applyRoomVideoState: jest.fn(),
+      ensureShareLink: jest.fn(),
+      persistRoomState: jest.fn(async () => undefined),
+      syncVideo: jest.fn(),
+      appendChatHistoryEntry: jest.fn(),
+      showComment: jest.fn(),
+      setChatHistory: jest.fn(),
+      showToast: jest.fn(),
+      notifyStatusTransitions: jest.fn(),
+    };
+
+    await roomFeature.connectToRoom.call(context as never, 'TOKEN1');
+
+    const userJoinedHandler = handlers.get('user-joined');
+    userJoinedHandler?.({
+      userId: 'USER2',
+      members: [
+        { id: 'HOST1', username: 'host' },
+        { id: 'USER2', username: 'member' },
+      ],
+      timestamp: 1234,
+    });
+
+    expect(context.broadcastHostVideoState).not.toHaveBeenCalled();
+  });
 });

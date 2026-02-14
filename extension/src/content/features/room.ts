@@ -348,10 +348,6 @@ export const roomFeature: RoomFeature = {
         }
       }
 
-      if (this.isHost) {
-        this.log('📡 Syncing state in response to new member join');
-        this.broadcastHostVideoState('user-joined');
-      }
     });
 
     this.socket.on('user-left', (data: {userId: string; members: RoomMember[]; timestamp: number}) => {
