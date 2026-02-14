@@ -108,4 +108,104 @@ describe('chatFeature', () => {
     const value = chatFeature.collectDanimeMediaInfo.call(context as never);
     expect(value).toBe('Episode 3 / Season 1');
   });
+
+  it('asks for confirmation before seeking from chat history click', () => {
+    const confirm = jest.fn(() => false);
+    Object.defineProperty(global, 'window', {
+      configurable: true,
+      value: {
+        confirm,
+        location: { href: 'https://example.com/watch' },
+      },
+    });
+
+    const entry = {
+      dataset: { playback: '12.5' },
+    };
+    const target = {
+      closest: jest.fn((selector: string) => {
+        if (selector === '.wp-chat-history-toggle') {
+          return null;
+        }
+        if (selector === '.wp-chat-entry') {
+          return entry;
+        }
+        return null;
+      }),
+    };
+
+    const preventDefault = jest.fn();
+    const stopPropagation = jest.fn();
+
+    const context = {
+      currentRoom: 'ROOM1',
+      isHost: false,
+      seekToPlaybackTime: jest.fn(),
+      applyRoomParamToUrl: jest.fn((url: string) => url),
+      urlsMatchForSync: jest.fn(() => true),
+      navigateToUrl: jest.fn(),
+      requestMemberNavigation: jest.fn(),
+    };
+
+    chatFeature.handleChatHistoryClick.call(context as never, {
+      target,
+      preventDefault,
+      stopPropagation,
+    } as unknown as MouseEvent);
+
+    expect(confirm).toHaveBeenCalledWith('このコメントの位置にジャンプしますか？');
+    expect(context.seekToPlaybackTime).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it('seeks when jump confirmation is accepted', () => {
+    const confirm = jest.fn(() => true);
+    Object.defineProperty(global, 'window', {
+      configurable: true,
+      value: {
+        confirm,
+        location: { href: 'https://example.com/watch' },
+      },
+    });
+
+    const entry = {
+      dataset: { playback: '9' },
+    };
+    const target = {
+      closest: jest.fn((selector: string) => {
+        if (selector === '.wp-chat-history-toggle') {
+          return null;
+        }
+        if (selector === '.wp-chat-entry') {
+          return entry;
+        }
+        return null;
+      }),
+    };
+
+    const preventDefault = jest.fn();
+    const stopPropagation = jest.fn();
+
+    const context = {
+      currentRoom: 'ROOM1',
+      isHost: false,
+      seekToPlaybackTime: jest.fn(),
+      applyRoomParamToUrl: jest.fn((url: string) => url),
+      urlsMatchForSync: jest.fn(() => true),
+      navigateToUrl: jest.fn(),
+      requestMemberNavigation: jest.fn(),
+    };
+
+    chatFeature.handleChatHistoryClick.call(context as never, {
+      target,
+      preventDefault,
+      stopPropagation,
+    } as unknown as MouseEvent);
+
+    expect(confirm).toHaveBeenCalledWith('このコメントの位置にジャンプしますか？');
+    expect(context.seekToPlaybackTime).toHaveBeenCalledWith(9);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+  });
 });

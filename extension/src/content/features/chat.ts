@@ -208,11 +208,18 @@ export const chatFeature: ChatFeature = {
     const url = entry.dataset.url ?? '';
     const playbackRaw = entry.dataset.playback ?? '';
     const playbackTime = Number.parseFloat(playbackRaw);
+    const canSeek = Number.isFinite(playbackTime);
+    const jumpConfirmed = (): boolean => window.confirm('このコメントの位置にジャンプしますか？');
 
     let navigationTriggered = false;
     if (url) {
       const resolvedUrl = this.currentRoom ? this.applyRoomParamToUrl(url, this.currentRoom) : url;
       if (!this.urlsMatchForSync(resolvedUrl, window.location.href)) {
+        if (!jumpConfirmed()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         this.navigateToUrl(resolvedUrl);
         if (!this.isHost) {
           this.requestMemberNavigation(resolvedUrl);
@@ -221,7 +228,12 @@ export const chatFeature: ChatFeature = {
       }
     }
 
-    if (!navigationTriggered && Number.isFinite(playbackTime)) {
+    if (!navigationTriggered && canSeek) {
+      if (!jumpConfirmed()) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       this.seekToPlaybackTime(playbackTime);
       event.preventDefault();
       event.stopPropagation();
