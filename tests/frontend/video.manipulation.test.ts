@@ -186,4 +186,47 @@ describe('videoFeature manipulation behavior', () => {
 
     expect(syncLocalPlaybackStatus).not.toHaveBeenCalled();
   });
+
+  it('does not emit playback events when controls are disabled for non-room state', () => {
+    const { video, handlers } = createMockVideo();
+    video.currentTime = 15;
+
+    Object.defineProperty(global, 'document', {
+      configurable: true,
+      value: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+
+    const emit = jest.fn();
+    const context = {
+      videoElement: video,
+      videoEventListenersBoundElement: null,
+      videoEventListenerCleanups: [] as Array<() => void>,
+      socket: { connected: true, emit },
+      currentUser: 'user-1',
+      isHost: false,
+      syncInProgress: false,
+      roomPlaybackStatus: 'paused',
+      lastUserInteractionAt: 0,
+      log: jest.fn(),
+      teardownVideoListeners: jest.fn(),
+      isPlaybackControlTarget: jest.fn(() => true),
+      recordUserInteraction: jest.fn(),
+      hasRecentUserInteraction: jest.fn(() => true),
+      isConnectedToRoom: jest.fn(() => false),
+      shouldEmitPlaybackEvents: jest.fn(() => false),
+      syncLocalPlaybackStatus: jest.fn(),
+    };
+
+    videoFeature.setupVideoListeners.call(context as never, video as never);
+
+    handlers.get('play')?.();
+    handlers.get('pause')?.();
+    video.paused = false;
+    handlers.get('seeked')?.();
+
+    expect(emit).not.toHaveBeenCalled();
+  });
 });

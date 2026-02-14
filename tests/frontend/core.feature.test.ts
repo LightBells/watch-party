@@ -14,12 +14,16 @@ describe('coreFeature', () => {
   it('returns expected playback emit permission by host/initial-state flags', () => {
     const base = {
       isHost: false,
+      currentRoom: 'ROOM1',
+      socket: { connected: true },
       awaitingInitialState: false,
       initialVideoStateApplied: true,
       log: jest.fn(),
     };
 
     expect(coreFeature.shouldEmitPlaybackEvents.call({ ...base, isHost: true } as never)).toBe(true);
+    expect(coreFeature.shouldEmitPlaybackEvents.call({ ...base, socket: { connected: false } } as never)).toBe(false);
+    expect(coreFeature.shouldEmitPlaybackEvents.call({ ...base, currentRoom: null } as never)).toBe(false);
     expect(coreFeature.shouldEmitPlaybackEvents.call({ ...base, awaitingInitialState: true } as never)).toBe(false);
     expect(coreFeature.shouldEmitPlaybackEvents.call({ ...base, initialVideoStateApplied: false } as never)).toBe(false);
     expect(coreFeature.shouldEmitPlaybackEvents.call(base as never)).toBe(true);

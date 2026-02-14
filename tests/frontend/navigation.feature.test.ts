@@ -143,4 +143,60 @@ describe('navigationFeature', () => {
     );
     expect(context.showShareFeedback).toHaveBeenCalledWith('共有リンクをコピーしました');
   });
+
+  it('does not force URL restore when no room is active', async () => {
+    Object.defineProperty(global, 'window', {
+      configurable: true,
+      value: {
+        location: {
+          href: 'https://example.com/watch?episode=2',
+          origin: 'https://example.com',
+        },
+      },
+    });
+
+    const syncRoomUrl = jest.fn();
+    const handleDeepLink = jest.fn(async () => undefined);
+    const context = {
+      debugNavigation: jest.fn(),
+      log: jest.fn(),
+      navigationInProgress: false,
+      lastKnownUrl: 'https://example.com/watch?episode=1',
+      currentRoom: null,
+      currentRoomUrl: 'https://example.com/watch?episode=1',
+      isHost: false,
+      socket: null,
+      normalizeUrlForComparison: navigationFeature.normalizeUrlForComparison,
+      applyRoomParamToUrl: navigationFeature.applyRoomParamToUrl,
+      syncRoomUrl,
+      handleDeepLink,
+    };
+
+    await navigationFeature.onUrlChanged.call(
+      context as never,
+      'https://example.com/watch?episode=2',
+    );
+
+    expect(syncRoomUrl).not.toHaveBeenCalled();
+    expect(context.currentRoomUrl).toBeNull();
+    expect(context.lastKnownUrl).toBe('https://example.com/watch?episode=2');
+    expect(handleDeepLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not emit member navigation when no room is active', () => {
+    const emit = jest.fn();
+    const context = {
+      debugNavigation: jest.fn(),
+      socket: { connected: true, emit },
+      currentRoom: null,
+      isHost: false,
+    };
+
+    navigationFeature.requestMemberNavigation.call(
+      context as never,
+      'https://example.com/watch?episode=3',
+    );
+
+    expect(emit).not.toHaveBeenCalled();
+  });
 });
