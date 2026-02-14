@@ -1,5 +1,50 @@
 import { chatFeature } from '../../extension/src/content/features/chat';
 
+class FakeClassList {
+  private classes = new Set<string>();
+
+  add(...names: string[]): void {
+    names.forEach((name) => this.classes.add(name));
+  }
+
+  remove(...names: string[]): void {
+    names.forEach((name) => this.classes.delete(name));
+  }
+
+  contains(name: string): boolean {
+    return this.classes.has(name);
+  }
+}
+
+type FakeDomElement = {
+  className: string;
+  classList: FakeClassList;
+  textContent: string;
+  dataset: Record<string, string>;
+  title: string;
+  tabIndex: number;
+  children: FakeDomElement[];
+  appendChild: (child: FakeDomElement) => FakeDomElement;
+  setAttribute: (name: string, value: string) => void;
+};
+
+const createFakeDomElement = (): FakeDomElement => ({
+  className: '',
+  classList: new FakeClassList(),
+  textContent: '',
+  dataset: {},
+  title: '',
+  tabIndex: 0,
+  children: [],
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  },
+  setAttribute(name: string, value: string) {
+    (this as unknown as Record<string, string>)[name] = value;
+  },
+});
+
 describe('chatFeature', () => {
   const originalWindow = global.window;
   const originalDocument = global.document;
@@ -207,5 +252,153 @@ describe('chatFeature', () => {
     expect(context.seekToPlaybackTime).toHaveBeenCalledWith(9);
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto scrolls to latest when chat history is already at bottom', () => {
+    Object.defineProperty(global, 'document', {
+      configurable: true,
+      value: {
+        createElement: () => createFakeDomElement(),
+      },
+    });
+
+    const context = {
+      ensureChatHistoryRefs: jest.fn(),
+      chatHistoryList: createFakeDomElement(),
+      isChatHistoryNearBottom: jest.fn(() => true),
+      trimChatHistory: jest.fn(),
+      updateChatHistoryEmptyState: jest.fn(),
+      scrollChatHistoryToLatest: jest.fn(),
+      showChatHistoryNewIndicator: jest.fn(),
+      formatPlaybackTimeLabel: jest.fn(() => null),
+      formatTimestampLabel: jest.fn(() => '12:00:00'),
+      chatHistoryExpanded: true,
+      chatDisplayMode: 'overlay',
+      currentUser: 'self',
+      chatHistoryNeedsScroll: false,
+    };
+
+    chatFeature.appendChatHistoryEntry.call(context as never, {
+      userId: 'other',
+      username: 'Alice',
+      message: 'new message',
+      timestamp: Date.now(),
+    });
+
+    expect(context.scrollChatHistoryToLatest).toHaveBeenCalledTimes(1);
+    expect(context.showChatHistoryNewIndicator).not.toHaveBeenCalled();
+  });
+
+  it('shows new message indicator when not at bottom', () => {
+    const openPanel = {
+      classList: {
+        contains: jest.fn(() => false),
+      },
+    };
+    Object.defineProperty(global, 'document', {
+      configurable: true,
+      value: {
+        createElement: () => createFakeDomElement(),
+        getElementById: (id: string) => (id === 'wp-comment-panel' ? openPanel : null),
+      },
+    });
+
+    const context = {
+      ensureChatHistoryRefs: jest.fn(),
+      chatHistoryList: createFakeDomElement(),
+      isChatHistoryNearBottom: jest.fn(() => false),
+      trimChatHistory: jest.fn(),
+      updateChatHistoryEmptyState: jest.fn(),
+      scrollChatHistoryToLatest: jest.fn(),
+      showChatHistoryNewIndicator: jest.fn(),
+      formatPlaybackTimeLabel: jest.fn(() => null),
+      formatTimestampLabel: jest.fn(() => '12:00:00'),
+      chatHistoryExpanded: true,
+      chatDisplayMode: 'overlay',
+      currentUser: 'self',
+      chatHistoryNeedsScroll: false,
+    };
+
+    chatFeature.appendChatHistoryEntry.call(context as never, {
+      userId: 'other',
+      username: 'Alice',
+      message: 'new message',
+      timestamp: Date.now(),
+    });
+
+    expect(context.scrollChatHistoryToLatest).not.toHaveBeenCalled();
+    expect(context.showChatHistoryNewIndicator).toHaveBeenCalledTimes(1);
+  });
+
+  it('scrollChatHistoryToLatest scrolls body and hides new indicator', () => {
+    const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    Object.defineProperty(global, 'window', {
+      configurable: true,
+      value: {
+        requestAnimationFrame,
+      },
+    });
+
+    const chatHistoryBody = {
+      scrollTop: 0,
+      scrollHeight: 480,
+    };
+    const context = {
+      ensureChatHistoryRefs: jest.fn(),
+      chatHistoryBody,
+      chatHistoryNeedsScroll: true,
+      chatHistoryExpanded: true,
+      chatHistoryAtBottom: false,
+      hideChatHistoryNewIndicator: jest.fn(),
+    };
+
+    chatFeature.scrollChatHistoryToLatest.call(context as never);
+
+    expect(chatHistoryBody.scrollTop).toBe(480);
+    expect(context.chatHistoryNeedsScroll).toBe(false);
+    expect(context.chatHistoryAtBottom).toBe(true);
+    expect(context.hideChatHistoryNewIndicator).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides new indicator when user scrolls back to bottom', () => {
+    const context = {
+      isChatHistoryNearBottom: jest.fn(() => true),
+      hideChatHistoryNewIndicator: jest.fn(),
+      chatHistoryAtBottom: false,
+    };
+
+    chatFeature.updateChatHistoryBottomState.call(context as never);
+
+    expect(context.chatHistoryAtBottom).toBe(true);
+    expect(context.hideChatHistoryNewIndicator).toHaveBeenCalledTimes(1);
+  });
+
+  it('binds new indicator click to scroll latest', () => {
+    const listeners: Record<string, () => void> = {};
+    const indicator = {
+      addEventListener: (event: string, handler: () => void) => {
+        listeners[event] = handler;
+      },
+    };
+
+    const context = {
+      ensureChatHistoryRefs: jest.fn(),
+      chatHistoryEventsBound: false,
+      chatHistoryToggle: null,
+      chatHistoryList: null,
+      chatHistoryBody: null,
+      chatHistoryNewIndicator: indicator,
+      chatHistoryNeedsScroll: false,
+      scrollChatHistoryToLatest: jest.fn(),
+    };
+
+    chatFeature.bindChatHistoryEvents.call(context as never);
+    listeners.click?.();
+
+    expect(context.chatHistoryNeedsScroll).toBe(true);
+    expect(context.scrollChatHistoryToLatest).toHaveBeenCalledTimes(1);
   });
 });

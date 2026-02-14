@@ -220,6 +220,13 @@ export const uiFeature: UiFeature = {
             </button>
           </div>
           <div class="wp-chat-history-body" id="wp-chat-history-body">
+            <button
+              id="wp-chat-history-new-indicator"
+              class="wp-chat-history-new-indicator hidden"
+              type="button"
+            >
+              新着メッセージがあります
+            </button>
             <div class="wp-chat-history-empty" id="wp-chat-history-empty">コメントはまだありません</div>
             <ul class="wp-chat-history-list" id="wp-chat-history-list"></ul>
           </div>

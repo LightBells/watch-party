@@ -11,11 +11,16 @@ import type {CommentCommandOptions, CommentPayload} from '../types';
 const DANIME_HOST_FRAGMENT = 'animestore.docomo.ne.jp';
 const DANIME_MEDIA_INFO_SELECTOR = '#backInfo > div > div[class="backInfoTxt1"], #backInfo > div > div[class="backInfoTxt2"]';
 const MEDIA_INFO_MAX_LENGTH = 300;
+const CHAT_HISTORY_BOTTOM_THRESHOLD = 20;
 
 export type ChatFeature = {
   sendComment(this: WatchPartyContent): void;
   ensureChatHistoryRefs(this: WatchPartyContent): void;
   bindChatHistoryEvents(this: WatchPartyContent): void;
+  isChatHistoryNearBottom(this: WatchPartyContent): boolean;
+  updateChatHistoryBottomState(this: WatchPartyContent): void;
+  showChatHistoryNewIndicator(this: WatchPartyContent): void;
+  hideChatHistoryNewIndicator(this: WatchPartyContent): void;
   updateChatHistoryEmptyState(this: WatchPartyContent): void;
   trimChatHistory(this: WatchPartyContent): void;
   toggleChatHistory(this: WatchPartyContent, force?: boolean): void;
@@ -100,6 +105,11 @@ export const chatFeature: ChatFeature = {
     if (!this.chatHistoryToggleIcon) {
       this.chatHistoryToggleIcon = document.getElementById('wp-chat-history-toggle-icon') as HTMLSpanElement | null;
     }
+    if (!this.chatHistoryNewIndicator) {
+      this.chatHistoryNewIndicator = document.getElementById(
+        'wp-chat-history-new-indicator',
+      ) as HTMLButtonElement | null;
+    }
   },
 
   bindChatHistoryEvents(this: WatchPartyContent): void {
@@ -115,8 +125,53 @@ export const chatFeature: ChatFeature = {
     if (this.chatHistoryList) {
       this.chatHistoryList.addEventListener('click', (event) => this.handleChatHistoryClick(event));
     }
+    if (this.chatHistoryBody) {
+      this.chatHistoryBody.addEventListener('scroll', () => this.updateChatHistoryBottomState());
+    }
+    if (this.chatHistoryNewIndicator) {
+      this.chatHistoryNewIndicator.addEventListener('click', () => {
+        this.chatHistoryNeedsScroll = true;
+        this.scrollChatHistoryToLatest();
+      });
+    }
 
     this.chatHistoryEventsBound = true;
+  },
+
+  isChatHistoryNearBottom(this: WatchPartyContent): boolean {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryBody) {
+      return true;
+    }
+
+    const remaining =
+      this.chatHistoryBody.scrollHeight - this.chatHistoryBody.scrollTop - this.chatHistoryBody.clientHeight;
+    return remaining <= CHAT_HISTORY_BOTTOM_THRESHOLD;
+  },
+
+  updateChatHistoryBottomState(this: WatchPartyContent): void {
+    this.chatHistoryAtBottom = this.isChatHistoryNearBottom();
+    if (this.chatHistoryAtBottom) {
+      this.hideChatHistoryNewIndicator();
+    }
+  },
+
+  showChatHistoryNewIndicator(this: WatchPartyContent): void {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryNewIndicator) {
+      return;
+    }
+
+    this.chatHistoryNewIndicator.classList.remove('hidden');
+  },
+
+  hideChatHistoryNewIndicator(this: WatchPartyContent): void {
+    this.ensureChatHistoryRefs();
+    if (!this.chatHistoryNewIndicator) {
+      return;
+    }
+
+    this.chatHistoryNewIndicator.classList.add('hidden');
   },
 
   updateChatHistoryEmptyState(this: WatchPartyContent): void {
@@ -290,6 +345,7 @@ export const chatFeature: ChatFeature = {
     if (!this.chatHistoryList) {
       return;
     }
+    const wasNearBottom = this.isChatHistoryNearBottom();
 
     const item = document.createElement('li');
     item.className = 'wp-chat-entry';
@@ -362,8 +418,20 @@ export const chatFeature: ChatFeature = {
 
     this.updateChatHistoryEmptyState();
 
-    if (options.scroll !== false && this.chatHistoryExpanded) {
+    const shouldAutoScroll =
+      options.scroll !== false &&
+      this.chatHistoryExpanded &&
+      wasNearBottom;
+
+    if (shouldAutoScroll) {
       this.scrollChatHistoryToLatest();
+      return;
+    }
+
+    const panel = document.getElementById('wp-comment-panel');
+    const isPanelOpen = Boolean(panel && !panel.classList.contains('hidden'));
+    if (this.chatHistoryExpanded && isPanelOpen) {
+      this.showChatHistoryNewIndicator();
     }
   },
 
@@ -390,7 +458,7 @@ export const chatFeature: ChatFeature = {
 
   scrollChatHistoryToLatest(this: WatchPartyContent): void {
     this.ensureChatHistoryRefs();
-    if (!this.chatHistoryContainer) {
+    if (!this.chatHistoryBody) {
       return;
     }
 
@@ -403,11 +471,13 @@ export const chatFeature: ChatFeature = {
     }
 
     window.requestAnimationFrame(() => {
-      if (!this.chatHistoryContainer) {
+      if (!this.chatHistoryBody) {
         return;
       }
-      this.chatHistoryContainer.scrollTop = this.chatHistoryContainer.scrollHeight;
+      this.chatHistoryBody.scrollTop = this.chatHistoryBody.scrollHeight;
       this.chatHistoryNeedsScroll = false;
+      this.chatHistoryAtBottom = true;
+      this.hideChatHistoryNewIndicator();
     });
   },
 

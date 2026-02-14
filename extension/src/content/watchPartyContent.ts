@@ -86,11 +86,15 @@ class WatchPartyContent {
 
   protected chatHistoryToggleIcon: HTMLSpanElement | null = null;
 
+  protected chatHistoryNewIndicator: HTMLButtonElement | null = null;
+
   protected chatHistoryExpanded = false;
 
   protected chatHistoryEventsBound = false;
 
   protected chatHistoryNeedsScroll = false;
+
+  protected chatHistoryAtBottom = true;
 
   protected overlayResizeObserver: ResizeObserver | null = null;
 
