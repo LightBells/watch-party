@@ -2,6 +2,133 @@ import type {WatchPartyContent} from '../watchPartyContent';
 
 import type {RoomMember} from '../types';
 
+const VIDEO_SIDEBAR_SHIFT_TARGET_SELECTOR =
+  '.atvwebplayersdk-player-container, .atvwebplayersdk-player, .atvwebplayersdk-video-surface, [data-testid="video-player"], .video-player, #dv-web-player';
+
+type SidebarLayoutState = {
+  chatSidebarContainer: HTMLDivElement | null;
+  chatPanelOriginalParent: HTMLElement | null;
+  chatToggleOriginalParent: HTMLElement | null;
+  sidebarShiftTarget: HTMLElement | null;
+  videoElement: HTMLVideoElement | null;
+  chatDisplayMode: 'overlay' | 'sidebar';
+};
+
+const ensureCommentSidebarContainer = (context: WatchPartyContent): HTMLDivElement | null => {
+  const state = context as unknown as SidebarLayoutState;
+  if (state.chatSidebarContainer && document.body.contains(state.chatSidebarContainer)) {
+    return state.chatSidebarContainer;
+  }
+
+  if (!document.body) {
+    return null;
+  }
+
+  const existing = document.getElementById('wp-comment-sidebar');
+  if (existing) {
+    state.chatSidebarContainer = existing as HTMLDivElement;
+    return state.chatSidebarContainer;
+  }
+
+  const sidebar = document.createElement('div');
+  sidebar.id = 'wp-comment-sidebar';
+  sidebar.className = 'wp-comment-sidebar hidden';
+  document.body.appendChild(sidebar);
+  state.chatSidebarContainer = sidebar;
+  return sidebar;
+};
+
+const resolveSidebarShiftTarget = (context: WatchPartyContent): HTMLElement | null => {
+  const state = context as unknown as SidebarLayoutState;
+  if (!state.videoElement) {
+    return null;
+  }
+
+  const container = state.videoElement.closest(VIDEO_SIDEBAR_SHIFT_TARGET_SELECTOR);
+  if (container) {
+    return container as HTMLElement;
+  }
+
+  if (state.videoElement.parentElement) {
+    return state.videoElement.parentElement as HTMLElement;
+  }
+
+  return state.videoElement as unknown as HTMLElement;
+};
+
+const applyVideoOnlySidebarShift = (context: WatchPartyContent, isOpen: boolean): void => {
+  const state = context as unknown as SidebarLayoutState;
+  const nextTarget = resolveSidebarShiftTarget(context);
+
+  if (state.sidebarShiftTarget && state.sidebarShiftTarget !== nextTarget) {
+    state.sidebarShiftTarget.classList.remove('wp-video-sidebar-shifted');
+  }
+
+  state.sidebarShiftTarget = nextTarget;
+
+  if (!state.sidebarShiftTarget) {
+    return;
+  }
+
+  state.sidebarShiftTarget.classList.toggle(
+    'wp-video-sidebar-shifted',
+    state.chatDisplayMode === 'sidebar' && isOpen,
+  );
+};
+
+const showCommentPanelInSidebar = (context: WatchPartyContent): void => {
+  const state = context as unknown as SidebarLayoutState;
+  const panel = document.getElementById('wp-comment-panel');
+  const toggleButton = document.getElementById('wp-toggle-comment');
+  const toggleWrap = toggleButton?.parentElement as HTMLDivElement | null;
+  const commentInputRoot = document.getElementById('wp-comment-input');
+  const sidebar = ensureCommentSidebarContainer(context);
+  if (!panel || !toggleWrap || !commentInputRoot || !sidebar) {
+    return;
+  }
+
+  if (!state.chatPanelOriginalParent) {
+    state.chatPanelOriginalParent = commentInputRoot;
+  }
+  if (!state.chatToggleOriginalParent) {
+    state.chatToggleOriginalParent = toggleWrap.parentElement;
+  }
+
+  sidebar.appendChild(toggleWrap);
+  sidebar.appendChild(panel);
+  sidebar.classList.remove('hidden');
+  panel.classList.remove('hidden');
+  commentInputRoot.classList.remove('expanded');
+  applyVideoOnlySidebarShift(context, true);
+};
+
+const hideCommentPanelFromSidebar = (context: WatchPartyContent): void => {
+  const state = context as unknown as SidebarLayoutState;
+  const panel = document.getElementById('wp-comment-panel');
+  const toggleButton = document.getElementById('wp-toggle-comment');
+  const toggleWrap = toggleButton?.parentElement as HTMLDivElement | null;
+  const commentInputRoot = document.getElementById('wp-comment-input');
+  const sidebar = ensureCommentSidebarContainer(context);
+  if (!panel || !toggleWrap || !commentInputRoot || !sidebar) {
+    return;
+  }
+
+  panel.classList.add('hidden');
+  const fallbackParent = document.getElementById('wp-comment-input');
+  const restoreParent = state.chatPanelOriginalParent ?? fallbackParent;
+  if (restoreParent) {
+    restoreParent.appendChild(panel);
+  }
+  const toggleRestoreParent = state.chatToggleOriginalParent ?? fallbackParent;
+  if (toggleRestoreParent) {
+    toggleRestoreParent.appendChild(toggleWrap);
+  }
+
+  sidebar.classList.add('hidden');
+  commentInputRoot.classList.remove('expanded');
+  applyVideoOnlySidebarShift(context, false);
+};
+
 export type UiFeature = {
   createWatchPartyUI(this: WatchPartyContent): void;
   bindUIEvents(this: WatchPartyContent): void;
@@ -108,6 +235,8 @@ export const uiFeature: UiFeature = {
     document.body.appendChild(floatingButton);
     document.body.appendChild(roomPopup);
     document.body.appendChild(commentInput);
+    this.chatPanelOriginalParent = commentInput;
+    this.chatToggleOriginalParent = commentInput;
 
     this.chatHistoryContainer = commentInput.querySelector('#wp-chat-history') as HTMLDivElement | null;
     this.chatHistoryBody = commentInput.querySelector('#wp-chat-history-body') as HTMLDivElement | null;
@@ -191,8 +320,31 @@ export const uiFeature: UiFeature = {
   toggleCommentPanel(this: WatchPartyContent): void {
     const panel = document.getElementById('wp-comment-panel');
     const toggleBtn = document.getElementById('wp-toggle-comment');
+    const commentInputRoot = document.getElementById('wp-comment-input');
 
-    if (!panel || !toggleBtn) {
+    if (!panel || !toggleBtn || !commentInputRoot) {
+      return;
+    }
+
+    if (this.chatDisplayMode === 'sidebar') {
+      const isOpen = toggleBtn.classList.contains('open');
+
+      if (isOpen) {
+        hideCommentPanelFromSidebar(this);
+        toggleBtn.classList.remove('open');
+      } else {
+        this.chatHistoryExpanded = true;
+        showCommentPanelInSidebar(this);
+        toggleBtn.classList.add('open');
+        this.getInput('wp-comment-text')?.focus();
+      }
+
+      const icon = toggleBtn.querySelector('.wp-toggle-icon');
+      if (icon) {
+        icon.textContent = toggleBtn.classList.contains('open') ? '›' : '‹';
+      }
+
+      this.applyChatHistoryExpansion();
       return;
     }
 
@@ -213,10 +365,7 @@ export const uiFeature: UiFeature = {
       }
     }
 
-    const commentInputRoot = document.getElementById('wp-comment-input');
-    if (commentInputRoot) {
-      commentInputRoot.classList.toggle('expanded', isOpen);
-    }
+    commentInputRoot.classList.toggle('expanded', isOpen);
 
     this.applyChatHistoryExpansion();
   },

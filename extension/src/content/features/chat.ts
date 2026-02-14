@@ -148,6 +148,13 @@ export const chatFeature: ChatFeature = {
   },
 
   toggleChatHistory(this: WatchPartyContent, force?: boolean): void {
+    if (this.chatDisplayMode === 'sidebar') {
+      this.chatHistoryExpanded = true;
+      this.chatHistoryNeedsScroll = true;
+      this.applyChatHistoryExpansion();
+      return;
+    }
+
     const nextState = typeof force === 'boolean' ? force : !this.chatHistoryExpanded;
     if (nextState === this.chatHistoryExpanded) {
       if (nextState) {
@@ -169,7 +176,9 @@ export const chatFeature: ChatFeature = {
     this.ensureChatHistoryRefs();
     const panel = document.getElementById('wp-comment-panel');
     const isPanelOpen = Boolean(panel && !panel.classList.contains('hidden'));
-    const shouldExpand = this.chatHistoryExpanded && isPanelOpen;
+    const shouldExpand =
+      this.chatDisplayMode === 'sidebar' ? isPanelOpen : this.chatHistoryExpanded && isPanelOpen;
+    const ariaExpanded = this.chatDisplayMode === 'sidebar' ? true : this.chatHistoryExpanded;
 
     if (this.chatHistoryContainer) {
       this.chatHistoryContainer.classList.toggle('expanded', shouldExpand);
@@ -178,10 +187,10 @@ export const chatFeature: ChatFeature = {
       this.chatHistoryBody.classList.toggle('expanded', shouldExpand);
     }
     if (this.chatHistoryToggle) {
-      this.chatHistoryToggle.setAttribute('aria-expanded', String(this.chatHistoryExpanded));
+      this.chatHistoryToggle.setAttribute('aria-expanded', String(ariaExpanded));
     }
     if (this.chatHistoryToggleIcon) {
-      this.chatHistoryToggleIcon.textContent = this.chatHistoryExpanded ? '▾' : '▸';
+      this.chatHistoryToggleIcon.textContent = ariaExpanded ? '▾' : '▸';
     }
 
     if (shouldExpand) {

@@ -60,11 +60,16 @@ class FakeElement {
 
   public innerHTML = '';
 
+  public parentElement: FakeElement | null = null;
+
+  public closestResult: FakeElement | null = null;
+
   constructor(id: string) {
     this.id = id;
   }
 
   appendChild(child: FakeElement): void {
+    child.parentElement = this;
     this.children.push(child);
   }
 
@@ -79,6 +84,10 @@ class FakeElement {
 
   focus(): void {
     this.focused = true;
+  }
+
+  closest(_selector: string): FakeElement | null {
+    return this.closestResult;
   }
 }
 
@@ -176,5 +185,79 @@ describe('uiFeature DOM behavior', () => {
 
     expect(onlineStatusSpan.textContent).toBe('オンライン');
     expect(offlineStatusSpan.textContent).toBe('オフライン');
+  });
+
+  it('toggleCommentPanel opens sidebar mode and shifts only video area', () => {
+    const panel = new FakeElement('wp-comment-panel');
+    panel.classList.add('hidden');
+
+    const toggleIcon = new FakeElement('wp-toggle-icon-node');
+    toggleIcon.classList.add('wp-toggle-icon');
+    toggleIcon.textContent = '‹';
+
+    const toggleButton = new FakeElement('wp-toggle-comment');
+    toggleButton.appendChild(toggleIcon);
+    const toggleWrap = new FakeElement('wp-comment-toggle-wrap');
+    toggleWrap.classList.add('wp-comment-toggle');
+    toggleWrap.appendChild(toggleButton);
+
+    const commentRoot = new FakeElement('wp-comment-input');
+    commentRoot.appendChild(toggleWrap);
+    const commentInput = new FakeElement('wp-comment-text');
+
+    const videoShiftTarget = new FakeElement('video-shift-target');
+    const videoElement = new FakeElement('video');
+    videoElement.closestResult = videoShiftTarget;
+
+    const body = new FakeElement('body');
+    const elements = new Map<string, FakeElement>([
+      ['wp-comment-panel', panel],
+      ['wp-toggle-comment', toggleButton],
+      ['wp-comment-input', commentRoot],
+      ['wp-comment-text', commentInput],
+    ]);
+
+    Object.defineProperty(global, 'document', {
+      configurable: true,
+      value: {
+        getElementById: (id: string) => elements.get(id) ?? null,
+        querySelector: (selector: string) => (selector === '.wp-comment-toggle' ? toggleWrap : null),
+        createElement: (_tag: string) => new FakeElement('generated-sidebar'),
+        body: {
+          appendChild: (node: FakeElement) => {
+            body.appendChild(node);
+            if (node.id) {
+              elements.set(node.id, node);
+            }
+          },
+          contains: (node: FakeElement) => body.children.includes(node),
+        },
+      },
+    });
+
+    const context = {
+      chatDisplayMode: 'sidebar',
+      chatSidebarContainer: null,
+      chatPanelOriginalParent: null,
+      chatToggleOriginalParent: null,
+      sidebarShiftTarget: null,
+      videoElement,
+      getInput: (id: string) => (id === 'wp-comment-text' ? commentInput : null),
+      applyChatHistoryExpansion: jest.fn(),
+    };
+
+    uiFeature.toggleCommentPanel.call(context as never);
+
+    expect(toggleButton.classList.contains('open')).toBe(true);
+    expect(toggleIcon.textContent).toBe('›');
+    expect(commentInput.focused).toBe(true);
+    expect(videoShiftTarget.classList.contains('wp-video-sidebar-shifted')).toBe(true);
+
+    uiFeature.toggleCommentPanel.call(context as never);
+
+    expect(toggleButton.classList.contains('open')).toBe(false);
+    expect(toggleIcon.textContent).toBe('‹');
+    expect(videoShiftTarget.classList.contains('wp-video-sidebar-shifted')).toBe(false);
+    expect(context.applyChatHistoryExpansion).toHaveBeenCalledTimes(2);
   });
 });
