@@ -1,6 +1,8 @@
 class WatchPartyUsernamePopup {
   private username: string | null = null;
 
+  private chatDisplayMode: 'overlay' | 'sidebar' = 'overlay';
+
   private usernameInput: HTMLInputElement;
 
   private saveButton: HTMLButtonElement;
@@ -9,14 +11,20 @@ class WatchPartyUsernamePopup {
 
   private statusElement: HTMLElement;
 
+  private overlayModeInput: HTMLInputElement;
+
+  private sidebarModeInput: HTMLInputElement;
+
   constructor() {
     this.usernameInput = this.queryElement<HTMLInputElement>('username');
     this.saveButton = this.queryElement<HTMLButtonElement>('save-username');
     this.charCount = this.queryElement<HTMLElement>('char-count');
     this.statusElement = this.queryElement<HTMLElement>('username-status');
+    this.overlayModeInput = this.queryElement<HTMLInputElement>('chat-display-overlay');
+    this.sidebarModeInput = this.queryElement<HTMLInputElement>('chat-display-sidebar');
 
     this.bindEvents();
-    void this.loadUsername();
+    void this.loadSettings();
   }
 
   private queryElement<T extends HTMLElement>(id: string): T {
@@ -28,9 +36,11 @@ class WatchPartyUsernamePopup {
   }
 
   private bindEvents(): void {
-    this.usernameInput.addEventListener('input', () => this.updateCharCount());
+    this.usernameInput.addEventListener('input', () => this.updateInputState());
+    this.overlayModeInput.addEventListener('change', () => this.updateInputState());
+    this.sidebarModeInput.addEventListener('change', () => this.updateInputState());
     this.saveButton.addEventListener('click', () => {
-      void this.saveUsername();
+      void this.saveSettings();
     });
     this.usernameInput.addEventListener('keypress', (event) => {
       if (event.isComposing) {
@@ -38,32 +48,43 @@ class WatchPartyUsernamePopup {
       }
 
       if (event.key === 'Enter' && !this.saveButton.disabled) {
-        void this.saveUsername();
+        void this.saveSettings();
       }
     });
   }
 
-  private async loadUsername(): Promise<void> {
+  private async loadSettings(): Promise<void> {
     try {
-      const result = await chrome.storage.local.get(['globalUsername']);
+      const result = await chrome.storage.local.get(['globalUsername', 'chatDisplayMode']);
       if (result.globalUsername) {
         this.username = result.globalUsername as string;
         this.usernameInput.value = this.username;
-        this.updateCharCount();
       }
+      this.chatDisplayMode =
+        result.chatDisplayMode === 'sidebar' || result.chatDisplayMode === 'overlay'
+          ? (result.chatDisplayMode as 'overlay' | 'sidebar')
+          : 'overlay';
+      this.overlayModeInput.checked = this.chatDisplayMode === 'overlay';
+      this.sidebarModeInput.checked = this.chatDisplayMode === 'sidebar';
+      this.updateInputState();
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error('Failed to load username:', error);
+      console.error('Failed to load settings:', error);
     }
   }
 
-  private updateCharCount(): void {
+  private getSelectedChatDisplayMode(): 'overlay' | 'sidebar' {
+    return this.sidebarModeInput.checked ? 'sidebar' : 'overlay';
+  }
+
+  private updateInputState(): void {
     const length = this.usernameInput.value.length;
     this.charCount.textContent = String(length);
 
     const hasInput = length > 0;
     const isDifferent = this.usernameInput.value !== this.username;
-    this.saveButton.disabled = !hasInput || !isDifferent;
+    const modeChanged = this.getSelectedChatDisplayMode() !== this.chatDisplayMode;
+    this.saveButton.disabled = !hasInput || (!isDifferent && !modeChanged);
 
     if (length > 15) {
       this.charCount.style.color = '#dc3545';
@@ -74,8 +95,9 @@ class WatchPartyUsernamePopup {
     }
   }
 
-  private async saveUsername(): Promise<void> {
+  private async saveSettings(): Promise<void> {
     const username = this.usernameInput.value.trim();
+    const selectedMode = this.getSelectedChatDisplayMode();
 
     if (!username) {
       this.showStatus('ユーザーネームを入力してください', 'error');
@@ -88,15 +110,19 @@ class WatchPartyUsernamePopup {
     }
 
     try {
-      await chrome.storage.local.set({ globalUsername: username });
+      await chrome.storage.local.set({
+        globalUsername: username,
+        chatDisplayMode: selectedMode,
+      });
       this.username = username;
+      this.chatDisplayMode = selectedMode;
       this.saveButton.disabled = true;
-      this.showStatus('ユーザーネームが保存されました', 'success');
+      this.showStatus('設定が保存されました', 'success');
 
       await this.updateTabSpecificUsernames(username);
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error('Failed to save username:', error);
+      console.error('Failed to save settings:', error);
       this.showStatus('保存に失敗しました', 'error');
     }
   }

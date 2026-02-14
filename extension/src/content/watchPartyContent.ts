@@ -6,7 +6,7 @@ import {
   PRODUCTION_SERVER_URL,
   ROOM_HASH_KEY,
 } from './constants';
-import type {PlaybackStatus, RoomMember, VideoState} from './types';
+import type {ChatDisplayMode, PlaybackStatus, RoomMember, VideoState} from './types';
 import {chatFeature, type ChatFeature} from './features/chat';
 import {coreFeature, type CoreFeature} from './features/core';
 import {navigationFeature, type NavigationFeature} from './features/navigation';
@@ -63,6 +63,16 @@ class WatchPartyContent {
   protected shareFeedbackTimeout: number | null = null;
 
   protected commentOverlay: HTMLDivElement | null = null;
+
+  protected chatDisplayMode: ChatDisplayMode = 'overlay';
+
+  protected chatSidebarContainer: HTMLDivElement | null = null;
+
+  protected chatPanelOriginalParent: HTMLElement | null = null;
+
+  protected chatToggleOriginalParent: HTMLElement | null = null;
+
+  protected sidebarShiftTarget: HTMLElement | null = null;
 
   protected chatHistoryContainer: HTMLDivElement | null = null;
 

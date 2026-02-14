@@ -20,6 +20,7 @@ export const coreFeature: CoreFeature = {
   async init(this: WatchPartyContent): Promise<void> {
     await this.loadDebugMode();
     await this.detectVideoElement();
+    this.chatDisplayMode = await this.loadChatDisplayMode();
     this.createWatchPartyUI();
     this.setupInteractionHandlers();
     this.setupMessageListener();

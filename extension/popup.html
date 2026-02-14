@@ -71,6 +71,20 @@
             color: #666;
             margin-top: 4px;
         }
+
+        .radio-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        .radio-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #333;
+            font-size: 13px;
+            cursor: pointer;
+        }
         
         .btn {
             width: 100%;
@@ -139,6 +153,19 @@
             <input type="text" id="username" placeholder="ユーザーネームを入力" maxlength="20">
             <div class="char-count">
                 <span id="char-count">0</span>/20
+            </div>
+        </div>
+        <div class="input-group">
+            <label>チャット表示位置</label>
+            <div class="radio-group">
+                <label class="radio-option" for="chat-display-overlay">
+                    <input type="radio" id="chat-display-overlay" name="chat-display-mode" value="overlay" checked>
+                    <span>overlay</span>
+                </label>
+                <label class="radio-option" for="chat-display-sidebar">
+                    <input type="radio" id="chat-display-sidebar" name="chat-display-mode" value="sidebar">
+                    <span>sidebar</span>
+                </label>
             </div>
         </div>
         <button id="save-username" class="btn" disabled>保存</button>

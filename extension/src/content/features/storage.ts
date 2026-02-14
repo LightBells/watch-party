@@ -1,7 +1,9 @@
 import type {WatchPartyContent} from '../watchPartyContent';
+import type {ChatDisplayMode} from '../types';
 
 export type StorageFeature = {
   getStoredUsername(this: WatchPartyContent): Promise<string | null>;
+  loadChatDisplayMode(this: WatchPartyContent): Promise<ChatDisplayMode>;
   saveRoomData(
     this: WatchPartyContent,
     roomId: string,
@@ -26,6 +28,21 @@ export const storageFeature: StorageFeature = {
       this.log('Failed to load username', error);
       return null;
     }
+  },
+
+  async loadChatDisplayMode(this: WatchPartyContent): Promise<ChatDisplayMode> {
+    try {
+      const result = (await chrome.storage.local.get(['chatDisplayMode'])) as {
+        chatDisplayMode?: string;
+      };
+      if (result.chatDisplayMode === 'sidebar' || result.chatDisplayMode === 'overlay') {
+        return result.chatDisplayMode;
+      }
+    } catch (error) {
+      this.log('Failed to load chat display mode', error);
+    }
+
+    return 'overlay';
   },
 
   async saveRoomData(

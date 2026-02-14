@@ -1,4 +1,5 @@
 type PlaybackStatus = 'playing' | 'paused';
+type ChatDisplayMode = 'overlay' | 'sidebar';
 
 type VideoState = {
   isPlaying: boolean;
@@ -50,6 +51,7 @@ type NavigateEventPayload = {
 };
 
 export type {
+  ChatDisplayMode,
   CommentCommandOptions,
   CommentPayload,
   NavigateEventPayload,
