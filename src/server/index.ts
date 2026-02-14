@@ -28,9 +28,26 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 const USE_FIRESTORE = process.env.NODE_ENV === 'production';
 
-const HOST_REASSIGN_DELAY_MS = 7000;
-const HEARTBEAT_INTERVAL_MS = 5000;
-const HEARTBEAT_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * 2;
+const getPositiveMsFromEnv = (envName: string, fallbackMs: number): number => {
+  const raw = process.env[envName];
+  if (!raw) {
+    return fallbackMs;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackMs;
+  }
+
+  return Math.floor(parsed);
+};
+
+const HOST_REASSIGN_DELAY_MS = getPositiveMsFromEnv('HOST_REASSIGN_DELAY_MS', 7000);
+const HEARTBEAT_INTERVAL_MS = getPositiveMsFromEnv('HEARTBEAT_INTERVAL_MS', 5000);
+const HEARTBEAT_TIMEOUT_MS = getPositiveMsFromEnv(
+  'HEARTBEAT_TIMEOUT_MS',
+  HEARTBEAT_INTERVAL_MS * 2,
+);
 
 type ConnectionStatus = 'online' | 'offline';
 
@@ -180,6 +197,18 @@ const normalizeMediaInfo = (raw: unknown): string | null => {
   }
 
   return normalized;
+};
+
+const normalizePlaybackTime = (value: unknown, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+
+  if (Number.isFinite(fallback) && fallback >= 0) {
+    return fallback;
+  }
+
+  return 0;
 };
 
 const verifyToken = (token: string): TokenPayload | null => {
@@ -507,15 +536,18 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const previousTime = normalizePlaybackTime(activeRoom.videoState.currentTime, 0);
+    const currentTime = normalizePlaybackTime(data?.currentTime, previousTime);
+
     activeRoom.videoState = {
       isPlaying: true,
-      currentTime: data?.currentTime ?? activeRoom.videoState.currentTime,
+      currentTime,
       lastUpdateTime: Date.now(),
     };
     activeRoom.playbackStatus = 'playing';
 
     socket.to(roomId).emit('play', {
-      currentTime: activeRoom.videoState.currentTime,
+      currentTime,
       userId,
       timestamp: Date.now(),
     });
@@ -527,15 +559,18 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const previousTime = normalizePlaybackTime(activeRoom.videoState.currentTime, 0);
+    const currentTime = normalizePlaybackTime(data?.currentTime, previousTime);
+
     activeRoom.videoState = {
       isPlaying: false,
-      currentTime: data?.currentTime ?? activeRoom.videoState.currentTime,
+      currentTime,
       lastUpdateTime: Date.now(),
     };
     activeRoom.playbackStatus = 'paused';
 
     socket.to(roomId).emit('pause', {
-      currentTime: activeRoom.videoState.currentTime,
+      currentTime,
       userId,
       timestamp: Date.now(),
     });
@@ -551,16 +586,21 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const previousTime = normalizePlaybackTime(activeRoom.videoState.currentTime, 0);
+    const currentTime = normalizePlaybackTime(data.currentTime, previousTime);
+    const nextIsPlaying =
+      typeof data.isPlaying === 'boolean' ? data.isPlaying : activeRoom.videoState.isPlaying;
+
     activeRoom.videoState = {
-      isPlaying: data.isPlaying,
-      currentTime: data.currentTime,
+      isPlaying: nextIsPlaying,
+      currentTime,
       lastUpdateTime: Date.now(),
     };
-    activeRoom.playbackStatus = data.isPlaying ? 'playing' : 'paused';
+    activeRoom.playbackStatus = nextIsPlaying ? 'playing' : 'paused';
 
     socket.to(roomId).emit('sync', {
-      isPlaying: data.isPlaying,
-      currentTime: data.currentTime,
+      isPlaying: nextIsPlaying,
+      currentTime,
       userId,
       timestamp: Date.now(),
     });
