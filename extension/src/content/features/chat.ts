@@ -666,7 +666,7 @@ export const chatFeature: ChatFeature = {
     if (normalized.length === 6 || normalized.length === 3) {
       return `#${normalized}`;
     }
-    return token;
+    return '';
   },
 
   setupCommentOverlay(this: WatchPartyContent): void {

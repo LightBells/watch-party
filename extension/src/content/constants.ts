@@ -45,6 +45,7 @@ const VIDEO_SELECTORS: readonly string[] = [
 
 const SUPPORTED_SITE_PATTERNS: readonly RegExp[] = [
   /https?:\/\/www\.amazon\.co\.jp\/gp\/video\//,
+  /https?:\/\/www.amazon.co.jp\/gp\/video\/detail\//,
   /https?:\/\/www\.amazon\.co\.jp\/\-\/[^/]+\/gp\/video\//,
   /animestore\.docomo\.ne\.jp\/animestore\/sc_d_pc/,
   /localhost:3000/,

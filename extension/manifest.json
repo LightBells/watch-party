@@ -19,7 +19,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.amazon.co.jp/-/*/gp/video/*",
+        "https://www.amazon.co.jp/gp/video/*",
+        "https://www.amazon.co.jp/-/*",
         "https://animestore.docomo.ne.jp/animestore/sc_d_pc*",
         "http://localhost:3000/*",
         "https://lightbells-watch-party.an.r.appspot.com/*"
