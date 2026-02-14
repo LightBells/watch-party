@@ -201,6 +201,14 @@ export const videoFeature: VideoFeature = {
         return;
       }
 
+      if (this.isHost && this.videoElement) {
+        this.socket.emit('heartbeat', {
+          isPlaying: !this.videoElement.paused,
+          currentTime: this.videoElement.currentTime,
+        });
+        return;
+      }
+
       this.socket.emit('heartbeat');
     };
 

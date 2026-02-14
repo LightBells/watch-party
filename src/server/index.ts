@@ -48,6 +48,7 @@ const HEARTBEAT_TIMEOUT_MS = getPositiveMsFromEnv(
   'HEARTBEAT_TIMEOUT_MS',
   HEARTBEAT_INTERVAL_MS * 2,
 );
+const MEMBER_ACTION_LOCK_MS = getPositiveMsFromEnv('MEMBER_ACTION_LOCK_MS', 2000);
 
 type ConnectionStatus = 'online' | 'offline';
 
@@ -106,6 +107,11 @@ interface SyncPayload extends PlaybackPayload {
   isPlaying: boolean;
 }
 
+interface HeartbeatPayload {
+  isPlaying?: boolean;
+  currentTime?: number;
+}
+
 interface ServerToClientEvents {
   'room-state': (data: {
     members: RoomMember[];
@@ -150,7 +156,7 @@ interface ClientToServerEvents {
   sync: (data: SyncPayload) => void;
   navigate: (data: NavigatePayload) => void;
   'member-navigate': (data: NavigatePayload) => void;
-  heartbeat: () => void;
+  heartbeat: (data?: HeartbeatPayload) => void;
 }
 
 interface InterServerEvents {}
@@ -245,6 +251,19 @@ const emitMemberStatus = (room: Room, changedUserId: string | null = null): void
     changedUserId,
     timestamp: Date.now(),
   });
+};
+
+const canAcceptNonHostPlaybackAction = (room: Room, userId: string): boolean => {
+  if (room.host === userId) {
+    return true;
+  }
+
+  const member = room.members.get(userId);
+  if (!member) {
+    return false;
+  }
+
+  return Date.now() - member.joinedAt >= MEMBER_ACTION_LOCK_MS;
 };
 
 const buildCommentPayload = (comment: CommentRecord): CommentBroadcastPayload => ({
@@ -538,6 +557,9 @@ io.on('connection', (socket) => {
     if (!activeRoom || !activeRoom.members.has(userId)) {
       return;
     }
+    if (!canAcceptNonHostPlaybackAction(activeRoom, userId)) {
+      return;
+    }
 
     const previousTime = normalizePlaybackTime(activeRoom.videoState.currentTime, 0);
     const currentTime = normalizePlaybackTime(data?.currentTime, previousTime);
@@ -561,6 +583,9 @@ io.on('connection', (socket) => {
     if (!activeRoom || !activeRoom.members.has(userId)) {
       return;
     }
+    if (!canAcceptNonHostPlaybackAction(activeRoom, userId)) {
+      return;
+    }
 
     const previousTime = normalizePlaybackTime(activeRoom.videoState.currentTime, 0);
     const currentTime = normalizePlaybackTime(data?.currentTime, previousTime);
@@ -582,6 +607,9 @@ io.on('connection', (socket) => {
   socket.on('sync', (data) => {
     const activeRoom = rooms.get(roomId);
     if (!activeRoom || !activeRoom.members.has(userId)) {
+      return;
+    }
+    if (!canAcceptNonHostPlaybackAction(activeRoom, userId)) {
       return;
     }
 
@@ -628,7 +656,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('heartbeat', () => {
+  socket.on('heartbeat', (data) => {
     const activeRoom = rooms.get(roomId);
     if (!activeRoom) {
       return;
@@ -640,6 +668,21 @@ io.on('connection', (socket) => {
     }
 
     member.lastHeartbeatAt = Date.now();
+    if (
+      activeRoom.host === userId &&
+      data &&
+      typeof data.isPlaying === 'boolean' &&
+      typeof data.currentTime === 'number'
+    ) {
+      const currentTime = normalizePlaybackTime(data.currentTime, activeRoom.videoState.currentTime);
+      activeRoom.videoState = {
+        isPlaying: data.isPlaying,
+        currentTime,
+        lastUpdateTime: Date.now(),
+      };
+      activeRoom.playbackStatus = data.isPlaying ? 'playing' : 'paused';
+    }
+
     if (member.status !== 'online') {
       member.status = 'online';
       emitMemberStatus(activeRoom, userId);

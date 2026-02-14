@@ -20,6 +20,7 @@ interface MemberStatusPayload {
 const TEST_HOST_REASSIGN_DELAY_MS = 3000;
 const TEST_HEARTBEAT_INTERVAL_MS = 1500;
 const TEST_HEARTBEAT_TIMEOUT_MS = TEST_HEARTBEAT_INTERVAL_MS * 2;
+const TEST_MEMBER_ACTION_LOCK_MS = 600;
 
 const makePort = (): number => 4000 + Math.floor(Math.random() * 20000);
 
@@ -146,6 +147,7 @@ describe('server e2e', () => {
         HOST_REASSIGN_DELAY_MS: String(TEST_HOST_REASSIGN_DELAY_MS),
         HEARTBEAT_INTERVAL_MS: String(TEST_HEARTBEAT_INTERVAL_MS),
         HEARTBEAT_TIMEOUT_MS: String(TEST_HEARTBEAT_TIMEOUT_MS),
+        MEMBER_ACTION_LOCK_MS: String(TEST_MEMBER_ACTION_LOCK_MS),
       },
       stdio: 'pipe',
     });
@@ -218,6 +220,85 @@ describe('server e2e', () => {
       await expect(syncPromise).resolves.toEqual(
         expect.objectContaining({ isPlaying: true, currentTime: 88.8, userId: hostJoin.userId }),
       );
+    } finally {
+      hostSocket.disconnect();
+      memberSocket.disconnect();
+    }
+  });
+
+  it('ignores non-host playback actions shortly after joining', async () => {
+    const roomId = `room-member-lock-${Date.now()}`;
+    const hostJoin = await joinRoom(baseUrl, roomId, 'host-user');
+    const memberJoin = await joinRoom(baseUrl, roomId, 'member-user');
+
+    const hostSocket = connectSocket(baseUrl, hostJoin.token);
+    const memberSocket = connectSocket(baseUrl, memberJoin.token);
+
+    try {
+      await Promise.all([
+        waitForEvent(hostSocket, 'room-state'),
+        waitForEvent(memberSocket, 'room-state'),
+      ]);
+
+      memberSocket.emit('sync', { isPlaying: true, currentTime: 15.2 });
+      await expect(expectNoEvent(hostSocket, 'sync', TEST_MEMBER_ACTION_LOCK_MS + 200)).resolves.toBeUndefined();
+
+      await wait(TEST_MEMBER_ACTION_LOCK_MS + 50);
+
+      const syncPromise = waitForEvent<{ isPlaying: boolean; currentTime: number; userId: string }>(
+        hostSocket,
+        'sync',
+      );
+      memberSocket.emit('sync', { isPlaying: true, currentTime: 23.7 });
+      await expect(syncPromise).resolves.toEqual(
+        expect.objectContaining({
+          isPlaying: true,
+          currentTime: 23.7,
+          userId: memberJoin.userId,
+        }),
+      );
+    } finally {
+      hostSocket.disconnect();
+      memberSocket.disconnect();
+    }
+  });
+
+  it('updates room videoState from host heartbeat payload', async () => {
+    const roomId = `room-heartbeat-sync-${Date.now()}`;
+    const hostJoin = await joinRoom(baseUrl, roomId, 'host-user');
+    const memberJoin = await joinRoom(baseUrl, roomId, 'member-user');
+
+    const hostSocket = connectSocket(baseUrl, hostJoin.token);
+    const memberSocket = connectSocket(baseUrl, memberJoin.token);
+
+    try {
+      await Promise.all([
+        waitForEvent(hostSocket, 'room-state'),
+        waitForEvent(memberSocket, 'room-state'),
+      ]);
+
+      hostSocket.emit('heartbeat', { isPlaying: true, currentTime: 55.5 });
+      await wait(120);
+
+      const thirdJoin = await joinRoom(baseUrl, roomId, 'third-user');
+      const thirdSocket = connectSocket(baseUrl, thirdJoin.token);
+
+      try {
+        const thirdState = await waitForEvent<{
+          playbackStatus: 'playing' | 'paused';
+          videoState: { isPlaying: boolean; currentTime: number };
+        }>(thirdSocket, 'room-state');
+
+        expect(thirdState.playbackStatus).toBe('playing');
+        expect(thirdState.videoState).toEqual(
+          expect.objectContaining({
+            isPlaying: true,
+            currentTime: 55.5,
+          }),
+        );
+      } finally {
+        thirdSocket.disconnect();
+      }
     } finally {
       hostSocket.disconnect();
       memberSocket.disconnect();
