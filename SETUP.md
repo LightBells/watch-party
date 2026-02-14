@@ -33,6 +33,22 @@
    - 「Watch Party - テスト用ページ」が表示されることを確認
    - 「サーバーに接続されています」と表示されることを確認
 
+### サーバー環境変数（任意）
+
+必要に応じて、サーバー起動前に以下を設定できます。
+
+- `JWT_SECRET`: JWT署名キー（必須）
+- `HOST_REASSIGN_DELAY_MS`: ホスト離脱時の再割り当て遅延（既定: `7000`）
+- `HEARTBEAT_INTERVAL_MS`: ハートビート監視間隔（既定: `5000`）
+- `HEARTBEAT_TIMEOUT_MS`: offline判定までの猶予（既定: `HEARTBEAT_INTERVAL_MS * 2`）
+- `MEMBER_ACTION_LOCK_MS`: 参加直後の非ホストに対する `play/pause/sync` 受付停止時間（既定: `2000`）
+
+例:
+
+```bash
+JWT_SECRET=dev-secret MEMBER_ACTION_LOCK_MS=2000 npm start
+```
+
 ## Chrome拡張機能の読み込み
 
 1. **ビルド済みスクリプトの生成**
