@@ -1,44 +1,66 @@
-const path = require('path');
-const CopyWebpackPlugin = require('copy-webpack-plugin');
-
-const mode = process.env.NODE_ENV === 'production' ? 'production' : 'development';
+const path = require("node:path");
+const CopyPlugin = require("copy-webpack-plugin");
+const HtmlWebpackPlugin = require("html-webpack-plugin");
+const pkg = require("./package.json");
 
 module.exports = {
-  mode,
-  devtool: mode === 'development' ? 'inline-source-map' : false,
   entry: {
-    background: path.resolve(__dirname, 'src/background.ts'),
-    content: path.resolve(__dirname, 'src/content.ts'),
-    popup: path.resolve(__dirname, 'src/popup.ts'),
+    content: "./src/entries/content.tsx",
+    popup: "./src/entries/popup.tsx",
   },
-  output: {
-    path: path.resolve(__dirname, 'dist'),
-    filename: '[name].js',
-    clean: true,
-  },
+  devtool: "source-map",
   resolve: {
-    extensions: ['.ts', '.js'],
+    extensions: [".tsx", ".ts", ".js"],
   },
   module: {
     rules: [
       {
-        test: /\.ts$/,
-        use: 'ts-loader',
+        test: /\.css$/,
+        use: ["style-loader", "css-loader", "postcss-loader"],
+      },
+      {
+        test: /\.tsx?$/,
+        use: {
+          loader: "ts-loader",
+          options: {
+            transpileOnly: true,
+            compilerOptions: {
+              noEmit: false,
+            },
+          },
+        },
         exclude: /node_modules/,
       },
     ],
   },
+  output: {
+    path: path.resolve(__dirname, "dist"),
+    filename: "[name].js",
+  },
   plugins: [
-    new CopyWebpackPlugin({
+    new HtmlWebpackPlugin({
+      filename: "popup.html",
+      template: "./src/features/popup/popup.template.html",
+      chunks: ["popup"],
+    }),
+    new CopyPlugin({
       patterns: [
-        { from: path.resolve(__dirname, 'manifest.json'), to: '.' },
-        { from: path.resolve(__dirname, 'popup.html'), to: '.' },
-        { from: path.resolve(__dirname, 'content.css'), to: '.' },
-        { from: path.resolve(__dirname, 'icons'), to: 'icons' },
+        {
+          from: "icons",
+          to: path.resolve(__dirname, "dist", "icons"),
+        },
+        {
+          from: "manifest.template.json",
+          to: path.resolve(__dirname, "dist", "manifest.json"),
+          transform(content) {
+            const manifest = JSON.parse(content.toString());
+            manifest.version = pkg.version;
+            manifest.description = pkg.description;
+
+            return JSON.stringify(manifest, null, 2);
+          },
+        },
       ],
     }),
   ],
-  optimization: {
-    splitChunks: false,
-  },
 };
